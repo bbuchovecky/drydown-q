@@ -1,0 +1,19 @@
+igbp_number,igbp_class,name
+1,ENF,Evergreen Needleleaf Forests
+2,EBF,Evergreen Broadleaf Forests
+3,DNF,Deciduous Needleleaf Forests
+4,DBF,Deciduous Broadleaf Forests
+5,MF,Mixed Forests
+6,CSH,Closed Shrublands
+7,OSH,Open Shrublands
+8,WSA,Woody Savannas
+9,SAV,Savannas
+10,GRA,Grasslands
+11,WET,Permanent Wetlands
+12,CRO,Croplands
+13,URB,Urban and Built-up Lands
+14,MOS,Cropland/Natural Vegetation Mosaics
+15,SNO,Permanent Snow and Ice
+16,BAR,Barren
+17,WAT,Water Bodies
+255,UNC,Unclassified

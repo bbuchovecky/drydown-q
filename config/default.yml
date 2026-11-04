@@ -1,0 +1,96 @@
+# drydown-q default configuration = the Morgan et al. (2025) baseline AS RUN.
+#
+# These values were inferred from the released results table
+# (ismn_results_star_th0_04may.csv); they differ in places from the released
+# soil/config.ini. Where Morgan's run had a quirk, the quirk is the default and
+# the alternative is an explicit option.
+#
+# One section per pipeline stage. The hash of a section is that stage's cache
+# key. A run file (config/runs/<name>.yml) overrides only the keys it lists.
+# Do not change values here: put alternatives in run files.
+
+prepare:
+  ismn_flags_kept: [G]                # ISMN quality flags kept (G = good); other flags become NaN
+  day_definition: utc                 # daily means are over UTC calendar dates
+  min_valid_hours: 1                  # [h] minimum valid hourly values for a daily mean (Morgan: no minimum)
+  grid_cell_rule: nearest             # CHIRPS/dPET cell choice: nearest | nearest_land_within_km
+  max_cell_offset_km: null            # [km] if set, flag/exclude stations whose chosen cell centre is farther; null = no limit
+  require_land_cell: false            # if true, flag stations whose chosen cell has no valid land data
+  lai_product: MOD15A2H.061           # MODIS LAI product: MOD15A2H.061 (Terra, Morgan) | MCD15A2H.061
+  lai_qc: none                        # LAI QC: none = keep raw values < 248 (fill codes), no QC bits (Morgan)
+  lai_fill_max_days: null             # [d] max forward-fill of 8-day composites; null = unlimited (Morgan)
+  pet_valid_max_mm_day: 100           # [mm d-1] dPET values >= this become NaN; negatives are kept (Morgan)
+
+soil:
+  theta_fc_rule: clapp_hornberger     # theta_fc from C&H (1978) texture class at psi_fc; fallback max_sm when class missing/absent
+  psi_fc_kpa: -33                     # [kPa] matric potential defining field capacity
+  theta_fc_round_m3m3: 0.01           # [m3 m-3] theta_fc is rounded to this precision (Morgan rounds to 2 dp)
+  rho_water_kg_m3: 1000               # [kg m-3] water density, converts C&H tension heads to potential (Morgan's value)
+  g_m_s2: 9.8                         # [m s-2] gravitational acceleration, same conversion (Morgan's value)
+  max_sm_quantile: 0.98               # [-] max_sm = this quantile of the sensor's daily theta
+  theta_w_rule: record_min            # theta_w: record_min (Morgan) | quantile | seasonal_min
+  theta_w_quantile: null              # [-] quantile of daily theta used when theta_w_rule = quantile
+  dz_rule: depth_bottom               # layer depth dz: depth_bottom = sensor depth_to (Morgan) | layer_thickness | fixed
+  dz_fixed_m: null                    # [m] dz used when dz_rule = fixed
+
+events:
+  mask_above_fc: true                 # mask theta > theta_fc, then back-fill (the back-fill also fills ordinary gaps)
+  start_min_decline_mm_day: 0.5       # [mm d-1] start threshold; tau_theta = value / (1000 dz) in m3 m-3 d-1
+  end_min_decline_mm_day: 0.5         # [mm d-1] end threshold (Morgan hard-coded the start value here)
+  min_decline_days: 4                 # [d] a start needs this many consecutive candidate days
+  precip_max_mm_day: 2                # [mm d-1] a candidate day needs P <= this
+  precip_check: start_window          # where rain is checked: start_window (Morgan) | whole_event
+  precip_missing_is_dry: true         # missing precipitation counts as P = 0
+  precip_source: chirps               # chirps (Morgan) | insitu_then_chirps
+  gap_rule: end_event                 # a missing day ends an event
+  exclude_snow_frozen: false          # if true, drop days flagged as snow/frozen before detection
+
+fitting:
+  models: [exponential, q_stage2]     # models fitted to every event
+  free_params_q: [k, q, theta_star]   # free parameters of q_stage2 (theta_0 and theta_w fixed)
+  theta_0_rule: first_obs             # theta_0 = first observation = min(event max, theta_fc) after masking
+  q_bounds: [0, .inf]                 # [-] bounds on q
+  q_start: 1.001                      # [-] starting q (avoids the singularity at q = 1)
+  theta_star_bounds: [min_sm, theta_fc]   # [m3 m-3] bounds on theta_star, named sensor constants; start = upper
+  k_upper: max_daily_pet              # k in [0, PET_max / (1000 dz)], PET_max = largest daily dPET in event; start = half
+  pet_default_mm_day: 5               # [mm d-1] PET_max used when dPET is missing for the whole event
+  exp_theta_w_bounds: [min_sm, event_min]  # [m3 m-3] exponential theta_w bounds, named constants; start = mean
+  exp_tau_bounds: [0, .inf]           # [d] exponential tau bounds
+  exp_tau_start: 1                    # [d] exponential tau starting value
+
+covariates:
+  ai_window_days: 60                  # [d] AI_60 = trailing sum(P) / sum(PET) over this window
+  ai_window_includes_start: true      # the window ends on (and includes) the event start day
+  ai_window_min_valid_days: 60        # [d] valid days required in the window (60 = all)
+  lai_statistic: start_day            # LAI covariate: start_day (latest composite, Morgan) | event_max | event_mean
+  class_scheme: morgan_3              # IGBP -> vegetation class mapping (data/tables/class_schemes.csv)
+  landcover_year: event_year          # MODIS IGBP of the event start year at the station pixel
+
+filters:
+  r2_min: 0.7                         # [-] minimum R2 of the q model fit (inclusive)
+  duration_days: [6, 100]             # [d] allowed event duration, inclusive both ends
+  q_min: 0.01                         # [-] q must be strictly greater than this
+  frac_range_min: 0.2                 # [-] (event max - min) / (max_sm - min_sm) must be strictly greater
+  mean_depth_max_m: 0.5               # [m] (depth_top + depth_bottom) / 2 must be <= this
+  dz_max_m: 0.5                       # [m] dz must be <= this
+  theta_star_minus_min_sm_min: 0.005  # [m3 m-3] theta_star - min_sm must be >= this
+  theta_star_minus_w_min: 0.005       # [m3 m-3] theta_star - theta_w must be >= this
+  classes: [HERB, SAV, WOOD]          # vegetation classes kept in the final set
+  lai_min_m2m2: 0.5                   # [m2 m-2] minimum LAI for the final event set
+  lai_min_inclusive: true             # final event set uses LAI >= lai_min_m2m2
+  abs_lat_max_deg: null               # [deg] if set, keep |lat| <= this
+
+binning:
+  ai_edges: [0, 0.2, 0.5, 0.65, 0.8, 1.0, 1.5, 2.0, .inf]   # [-] AI_60 bin edges
+  lai_edges: [0, 0.5, 1, 2, 3, 5, .inf]                      # [m2 m-2] LAI bin edges
+  bins_right_closed: false            # false = bins are [lo, hi), as pd.cut(right=False)
+  open_bin_upper_for_mid: {ai: 3.2, lai: 7}   # upper value used for the open last bin's midpoint (mids 2.6 and 6)
+  lai_min_inclusive_surface: false    # the surface set uses LAI > filters.lai_min_m2m2 (strict)
+  min_events_per_bin: 5               # [events] bins with fewer events are not used in the surface fit
+  statistic: median                   # bin statistic of q
+  bin_weights: equal                  # every used bin has equal weight in the surface fit
+  surface_form: "a*ai + b*lai + c*ai*lai + d"   # surface fitted to bin statistics
+
+runtime:
+  n_jobs: -1                          # joblib workers over stations (-1 = all cores); not part of any cache key
+  log_level: INFO                     # logging level

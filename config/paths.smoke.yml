@@ -1,0 +1,9 @@
+# Paths for `pixi run smoke`: the committed synthetic 3-station dataset.
+# No raw-data inputs are needed; analyze.py starts from sensors + station_day.
+ismn_archive: null
+chirps_dir: null
+dpet_dir: null
+appeears_dir: null
+morgan_repo: null
+outputs_dir: outputs/smoke
+prepared_dir: tests/data/smoke

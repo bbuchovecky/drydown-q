@@ -1,0 +1,9 @@
+# Machine-specific paths. Copy to config/paths.yml (git-ignored) and edit.
+# Relative paths are resolved against the repository root; ~ is expanded.
+ismn_archive: ~/data/ISMN/Data_separate_files_header_20000101_20231231.zip   # ISMN archive (zip or unpacked folder)
+chirps_dir: ~/data/CHIRPS/v2.0/p05/daily     # CHIRPS v2.0 0.05 deg daily netCDF files
+dpet_dir: ~/data/dPET                        # dPET (Singer et al.) 0.1 deg daily netCDF files
+appeears_dir: ~/projects/appeears-workflow/data/processed/appeears   # tidy AppEEARS parquet (appeears_pipeline)
+morgan_repo: ~/projects/ismn-drydowns        # released Morgan et al. code + data (reproduction targets)
+outputs_dir: outputs                         # cache/ and runs/ are written here
+prepared_dir: null                           # sensors + station_day from prepare.py; null = <outputs_dir>/prepared

@@ -1,0 +1,12 @@
+texture_class,b,psi_s_cm,porosity_m3m3,ks_cm_min,source
+sand,4.05,12.1,0.395,1.056,"Clapp & Hornberger (1978) Table 2, as in drydowns/soil.py"
+loamy sand,4.38,9.0,0.410,0.938,"Clapp & Hornberger (1978) Table 2, as in drydowns/soil.py"
+sandy loam,4.90,21.8,0.435,0.208,"Clapp & Hornberger (1978) Table 2, as in drydowns/soil.py"
+silt loam,5.30,78.6,0.485,0.0432,"Clapp & Hornberger (1978) Table 2, as in drydowns/soil.py"
+loam,5.39,47.8,0.451,0.0417,"Clapp & Hornberger (1978) Table 2, as in drydowns/soil.py"
+sandy clay loam,7.12,29.9,0.420,0.0378,"Clapp & Hornberger (1978) Table 2, as in drydowns/soil.py"
+silty clay loam,7.75,35.6,0.477,0.0102,"Clapp & Hornberger (1978) Table 2, as in drydowns/soil.py"
+clay loam,8.52,63.0,0.476,0.0147,"Clapp & Hornberger (1978) Table 2, as in drydowns/soil.py"
+sandy clay,10.4,15.3,0.426,0.0130,"Clapp & Hornberger (1978) Table 2, as in drydowns/soil.py"
+silty clay,10.4,49.0,0.492,0.0062,"Clapp & Hornberger (1978) Table 2, as in drydowns/soil.py"
+clay,11.4,40.5,0.482,0.0077,"Clapp & Hornberger (1978) Table 2, as in drydowns/soil.py"

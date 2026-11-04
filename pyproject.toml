@@ -1,0 +1,18 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "drydown-q"
+version = "0.1.0"
+description = "Readable rewrite of the Morgan et al. (2025) soil moisture drydown analysis"
+requires-python = ">=3.12,<3.13"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/drydown_q"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "recovery: synthetic parameter-recovery test (slower; run with `pytest -m recovery`)",
+]
