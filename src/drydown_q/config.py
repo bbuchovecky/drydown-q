@@ -32,6 +32,7 @@ Number = int | float
 
 @dataclass(frozen=True)
 class Prepare:
+    sensor_unit: Literal["probe", "file"]
     ismn_flags_kept: list[str]
     day_definition: Literal["utc"]
     min_valid_hours: int

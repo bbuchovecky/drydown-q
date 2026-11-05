@@ -95,7 +95,7 @@ Units are in the column names. Filters add columns and never drop rows.
 
 | Column | Type | Meaning |
 | --- | --- | --- |
-| `sensor_id` | str | `network/station/<variable>_<depth_from>_<depth_to>_<instrument>` |
+| `sensor_id` | str | `network/station/<model>_<probe>_soil_moisture_<depth_from>_<depth_to>` for a whole probe record (`prepare.sensor_unit = probe`, joining the archive's deployment-period files `<model>_<probe>_<period>`), or the ISMN file's sensor name (`sensor_unit = file`) |
 | `station_id` | str | `network/station` |
 | `network` | str | ISMN network |
 | `lat_deg`, `lon_deg` | float | station coordinates [°] |

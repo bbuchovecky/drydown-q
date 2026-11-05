@@ -80,15 +80,18 @@ archive, meta_path = Path(cfg.paths.ismn_archive), work / "ismn_meta"
 sensors_file = work / "ismn_sensors.parquet"
 if not sensors_file.exists():
     ismn_daily.read_sensors(ismn_daily.open_archive(archive, meta_path)).to_parquet(sensors_file, index=False)
-sensors = pd.read_parquet(sensors_file)
-log.info("1. ISMN: %d soil moisture sensors at %d stations", len(sensors), sensors.station_id.nunique())
+files = pd.read_parquet(sensors_file)
+# The analysis sensor is a whole probe record (prepare.sensor_unit = probe) or one archive file.
+sensors, members = ismn_daily.sensor_units(files, p.sensor_unit)
+log.info("1. ISMN: %d soil moisture files -> %d sensors (unit = %s) at %d stations",
+         len(files), len(sensors), p.sensor_unit, sensors.station_id.nunique())
 
-daily_dir = work / "daily"
+daily_dir = work / f"daily_{p.sensor_unit}"
 daily_dir.mkdir(exist_ok=True)
 n_batches = max(1, min(len(sensors), effective_n_jobs(cfg.runtime.n_jobs)))
 batches = [sensors.iloc[rows] for rows in np.array_split(np.arange(len(sensors)), n_batches)]
 results = Parallel(n_jobs=cfg.runtime.n_jobs)(
-    delayed(ismn_daily.write_daily_files)(archive, meta_path, b, p.ismn_flags_kept,
+    delayed(ismn_daily.write_daily_files)(archive, meta_path, b, members, p.ismn_flags_kept,
                                           p.min_valid_hours, daily_dir) for b in batches)
 failures += [f for batch in results for f in batch]
 sensors["daily_file"] = [daily_dir / f"{ismn_daily.file_key(s)}.parquet" for s in sensors.sensor_id]

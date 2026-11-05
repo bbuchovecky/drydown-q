@@ -118,7 +118,7 @@ def prepared(raw, tmp_path_factory):
 
 def test_prepare_sensors(prepared):
     s = prepared["sensors"].set_index("sensor_id")
-    assert len(s) == 3
+    assert len(s) == 4      # 3 single-file sensors + one probe joined from 2 period files
     sid = "NETA/St1/ProbeX_soil_moisture_0.050000_0.050000"
     assert s.loc[sid, "texture_class"] == "loam" and s.loc[sid, "sand_frac"] == pytest.approx(0.40)
     assert s.loc[sid, "chirps_cell_is_land"] and s.loc[sid, "dpet_cell_is_land"]
@@ -162,6 +162,38 @@ def test_prepare_modis_columns(prepared):
     assert d.loc["2020-03-15", "lai_m2m2"] > 0
 
 
+def test_probe_periods_are_joined(prepared):
+    day = prepared["day"]
+    sid = "NETA/St2/ProbeY_1_soil_moisture_0.200000_0.200000"
+    d = day[day.sensor_id == sid].set_index("date")
+    assert d.loc["2020-03-02", "n_valid_hours"] == 24 and d.loc["2020-06-02", "n_valid_hours"] == 24
+    assert d.loc["2020-04-30", "n_valid_hours"] == 24        # shared timestamp counted once
+    assert not day.sensor_id.str.contains("ProbeY_1_1").any()
+
+
+def test_sensor_units():
+    from drydown_q.ismn_daily import sensor_units
+    files = pd.DataFrame({
+        "sensor_id": ["N/S/A_1_1_soil_moisture_0.050000_0.050000", "N/S/A_1_2_soil_moisture_0.050000_0.050000",
+                      "N/S/B_1_3_soil_moisture_0.050000_0.050000", "N/S/A_2_1_soil_moisture_0.050000_0.050000",
+                      "N/S/Old_soil_moisture_0.100000_0.100000"],
+        "network": "N", "station": "S",
+        "sensor": ["A_1_1_soil_moisture_0.050000_0.050000", "A_1_2_soil_moisture_0.050000_0.050000",
+                   "B_1_3_soil_moisture_0.050000_0.050000", "A_2_1_soil_moisture_0.050000_0.050000",
+                   "Old_soil_moisture_0.100000_0.100000"],
+        "instrument": ["A_1_1", "A_1_2", "B_1_3", "A_2_1", "Old"],
+        "depth_top_m": [0.05, 0.05, 0.05, 0.05, 0.1], "depth_bottom_m": [0.05, 0.05, 0.05, 0.05, 0.1]})
+    sensors, members = sensor_units(files, "probe")
+    assert sorted(sensors.sensor_id) == ["N/S/A_1_soil_moisture_0.050000_0.050000",
+                                         "N/S/A_2_soil_moisture_0.050000_0.050000",
+                                         "N/S/B_1_soil_moisture_0.050000_0.050000",   # model change: new sensor
+                                         "N/S/Old_soil_moisture_0.100000_0.100000"]
+    a1 = members[members.sensor_id == "N/S/A_1_soil_moisture_0.050000_0.050000"]
+    assert a1.sensor.tolist() == ["A_1_1_soil_moisture_0.050000_0.050000", "A_1_2_soil_moisture_0.050000_0.050000"]
+    same, _ = sensor_units(files, "file")
+    assert len(same) == 5 and set(same.sensor_id) == set(files.sensor_id)
+
+
 def test_prepare_rerun_skips_completed_work(prepared):
     assert prepared["failures"].empty
     assert "already prepared" in prepared["log"]
@@ -191,5 +223,5 @@ def test_prepare_stops_after_ismn_without_forcing_paths(raw, tmp_path):
                          capture_output=True, text=True, cwd=REPO)
     assert run.returncode == 0, run.stderr[-2000:]
     assert "stopping after step 1" in run.stderr
-    assert len(list((tmp_path / "prepared" / "work" / "daily").glob("*.parquet"))) == 3
+    assert len(list((tmp_path / "prepared" / "work" / "daily_probe").glob("*.parquet"))) == 4
     assert not (tmp_path / "prepared" / "station_day.parquet").exists()

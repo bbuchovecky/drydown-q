@@ -10,6 +10,7 @@
 # Do not change values here: put alternatives in run files.
 
 prepare:
+  sensor_unit: probe                  # probe = join a probe's ISMN period files (_<probe>_<period>) into one record (Morgan's unit) | file
   ismn_flags_kept: [G]                # ISMN quality flags kept (G = good); other flags become NaN
   day_definition: utc                 # daily means are over UTC calendar dates
   min_valid_hours: 1                  # [h] minimum valid hourly values for a daily mean (Morgan: no minimum)

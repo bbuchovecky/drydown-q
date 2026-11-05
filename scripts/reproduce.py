@@ -32,7 +32,7 @@ from drydown_q.config import TABLES_DIR, load_config, write_resolved
 from drydown_q.covariates import add_derived, assign_class
 from drydown_q.filters import QUALITY_RULES, cascade, flag_filters
 from drydown_q.fitting import fit_event
-from drydown_q.ismn_daily import PERCENT as ismn_percent, file_key
+from drydown_q.ismn_daily import PERCENT as ismn_percent, file_key, sensor_units
 from drydown_q.report import compare_events, markdown_table, match_sensors, write_report
 from drydown_q.soil import sensor_constants
 
@@ -66,7 +66,8 @@ ours = []   # (check, veg_class, quantity, value)
 # event of a paired sensor (the released `theta` arrays are unmasked daily means).
 if args.check_ismn:
     work = Path(cfg.paths.prepared_dir) / "work"
-    ours = pd.read_parquet(work / "ismn_sensors.parquet")
+    ours, _ = sensor_units(pd.read_parquet(work / "ismn_sensors.parquet"), cfg.prepare.sensor_unit)
+    daily_dir = work / f"daily_{cfg.prepare.sensor_unit}"
     meta = pd.read_csv(data / "ISMN" / "metadata.csv")
     meta = meta[meta["variable"] == "soil_moisture"].rename(
         columns={"depth_from": "depth_top_m", "depth_to": "depth_bottom_m"})
@@ -90,7 +91,7 @@ if args.check_ismn:
 
     def our_daily(sid):
         if sid not in daily_cache:
-            daily_cache[sid] = pd.read_parquet(work / "daily" / f"{file_key(sid)}.parquet")
+            daily_cache[sid] = pd.read_parquet(daily_dir / f"{file_key(sid)}.parquet")
         return daily_cache[sid]
 
     def equal_share(sid, rel_days):
@@ -127,7 +128,7 @@ if args.check_ismn:
     pairs = pd.concat([pairs, pd.DataFrame(by_data)], ignore_index=True)
     covered = rel_sensors.merge(pairs, on=["network", "their_station", "their_sensor"])
     rows = [("Morgan soil moisture sensors (metadata.csv)", len(meta)),
-            ("our soil moisture sensors", len(ours)),
+            (f"our soil moisture sensors (unit = {cfg.prepare.sensor_unit})", len(ours)),
             ("paired by exact name", int((pairs["match"] == "name").sum())),
             ("paired by unique depth", int((pairs["match"] == "depth").sum())),
             ("paired by data (replicate probes)", int((pairs["match"] == "data").sum())),

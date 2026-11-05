@@ -52,6 +52,15 @@ def write_ismn(root: Path) -> Path:
         lines = [f"{t:%Y/%m/%d %H:%M} {v:.4f} {f} M" for t, v, f, k in zip(times, values, flags, keep) if k]
         name = f"NETA_NETA_{station}_sm_{depth:.6f}_{depth:.6f}_ProbeX_20200301_20200630.stm"
         (archive / "NETA" / station / name).write_text(header + "\n".join(lines) + "\n")
+    # A probe split over two deployment-period files (recent ISMN naming
+    # <model>_<probe>_<period>), consecutive, sharing one timestamp.
+    lat, lon = STATIONS["St2"]
+    header = f"NETA NETA St2 {lat:.5f} {lon:.5f} 500.0 0.2000 0.2000 'ProbeY'\n"
+    for period, (t0, t1) in enumerate([("2020-03-01", "2020-04-30 00:00"), ("2020-04-30 00:00", "2020-06-30 23:00")], 1):
+        t = pd.date_range(t0, t1, freq="h")
+        lines = [f"{x:%Y/%m/%d %H:%M} {sm_value('St2', 0.20, x):.4f} G M" for x in t]
+        name = f"NETA_NETA_St2_sm_0.200000_0.200000_ProbeY_1_{period}_20200301_20200630.stm"
+        (archive / "NETA" / "St2" / name).write_text(header + "\n".join(lines) + "\n")
     return archive
 
 
