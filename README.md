@@ -73,6 +73,16 @@ setting refits nothing. A run's report, resolved config, log and manifest (confi
 code hash, input checksums, stage keys, package versions, wall time) go to
 `outputs/runs/<run>/`.
 
+## Sensitivity sweeps
+
+`pixi run sweep --sweep thresholds` reads `config/sweeps/thresholds.yml` (a base run and
+the settings to vary, one at a time or as a grid), runs every configuration through
+`analyze.py` in `outputs/runs/sweep_<name>/<label>/`, and writes
+`summary.parquet` and `specification_curve.png` there. The base configuration runs
+first and fills the shared cache; the rest run in parallel, so a configuration that
+changes only filters or binning reuses the base events and fits. A completed
+configuration is skipped on rerun; a failed one is recorded and the sweep continues.
+
 ## Reproduction
 
 `pixi run reproduce` runs tier 1: the released Morgan et al. results table is used
@@ -181,7 +191,9 @@ The `fits` columns of the q model, plus `sensor_id`, `station_id`, `ai_60d`,
 
 Each run also writes `outputs/runs/<run>/summary.json` with its headline numbers.
 
-### `summary`: one sweep run
+### `summary`: one sweep configuration
 
-Changed settings, counts, median q by class, coefficients, R², sign of ∂q/∂AI₆₀ at
-the class median LAI.
+`run`, `changed_key`, `changed_value`, `status`, `message`, `events_final`,
+`stations_final`, `events_surface`, and per class `median_q_<class>`, `a_<class>` …
+`d_<class>`, `r2_bins_<class>`, `n_bins_<class>`, `dq_dai_at_median_lai_<class>`,
+`dq_dai_sign_<class>`; plus `herb_minus_wood_q`.

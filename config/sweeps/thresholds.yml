@@ -1,0 +1,12 @@
+# Threshold sensitivity: one key at a time, everything else at the base run.
+# Values equal to the base run's are listed for readability; that configuration
+# is run once, as the baseline. Approved 2026-11-04.
+base_run: morgan2025
+mode: one_at_a_time          # one_at_a_time | grid
+changes:
+  filters.r2_min: [0.5, 0.6, 0.7, 0.8, 0.9]                               # [-]
+  filters.duration_days: [[4, 100], [5, 100], [6, 100], [8, 100], [10, 100], [6, 30]]   # [d]
+  filters.frac_range_min: [0.1, 0.15, 0.2, 0.3, 0.4]                      # [-]
+  filters.lai_min_m2m2: [0, 0.25, 0.5, 1.0]                               # [m2 m-2]
+  events.min_decline_days: [4, 5, 6]                                      # [d]; changes events, so these refit
+  binning.min_events_per_bin: [3, 5, 10, 20]                              # [events]

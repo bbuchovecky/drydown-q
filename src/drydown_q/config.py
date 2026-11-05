@@ -13,6 +13,7 @@ rejected. This module holds no scientific numbers.
 
 import dataclasses
 import hashlib
+import itertools
 import json
 import types
 import typing
@@ -266,6 +267,53 @@ def load_config(run: str, paths_file: Path | None = None,
 
     sections = {name: _build(cls, merged.get(name, {}), name) for name, cls in SECTIONS.items()}
     return Config(run_name=run, paths=_build(Paths, paths, str(paths_file)), **sections)
+
+
+def load_sweep(name: str) -> tuple[str, list[tuple[str, dict]]]:
+    """Read ``config/sweeps/<name>.yml``; return ``(base_run, configurations)``.
+
+    A sweep file has ``base_run``, ``mode`` and ``changes`` (``"section.key":
+    [values]``). ``one_at_a_time``: each key takes each listed value with all
+    else at the base run; ``grid``: every combination. Each configuration is
+    ``(label, overrides)``; the base run itself is ``("baseline", {})`` and any
+    configuration equal to it is dropped. Every configuration is validated.
+    """
+    path = CONFIG_DIR / "sweeps" / f"{name}.yml"
+    if not path.exists():
+        raise ConfigError(f"no sweep file {path}")
+    sweep = _read_yaml(path)
+    unknown = set(sweep) - {"base_run", "mode", "changes"}
+    if unknown or not {"base_run", "mode", "changes"} <= set(sweep):
+        raise ConfigError(f"{path}: needs exactly base_run, mode, changes (got {sorted(sweep)})")
+    if sweep["mode"] not in ("one_at_a_time", "grid"):
+        raise ConfigError(f"{path}: mode must be one_at_a_time or grid")
+    default = _read_yaml(CONFIG_DIR / "default.yml")
+    base = merge(default, _read_yaml(CONFIG_DIR / "runs" / f"{sweep['base_run']}.yml"), sweep["base_run"])
+    changes = sweep["changes"]
+    if sweep["mode"] == "one_at_a_time":
+        combos = [{key: value} for key, values in changes.items() for value in values]
+    else:
+        keys = list(changes)
+        combos = [dict(zip(keys, values)) for values in itertools.product(*changes.values())]
+    configs, seen = [("baseline", {})], {config_hash(base)}
+    for combo in combos:
+        overrides = {}
+        for dotted, value in combo.items():
+            section, _, key = dotted.partition(".")
+            overrides.setdefault(section, {})[key] = value
+        merged = merge(base, overrides, f"{path}: {combo}")
+        for section, cls in SECTIONS.items():
+            _build(cls, merged[section], f"{path}: {section}")
+        if config_hash(merged) in seen:
+            continue
+        seen.add(config_hash(merged))
+        label = "__".join(f"{k}={_label(v)}" for k, v in combo.items())
+        configs.append((label, overrides))
+    return sweep["base_run"], configs
+
+
+def _label(value) -> str:
+    return "-".join(map(str, value)) if isinstance(value, list) else str(value)
 
 
 def as_dict(obj) -> dict:

@@ -39,6 +39,7 @@ parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
 parser.add_argument("--run", required=True, help="run name: config/runs/<run>.yml")
 parser.add_argument("--paths", default=None, help="paths file (default config/paths.yml)")
 parser.add_argument("--overrides", default=None, help="JSON overrides (used by sweep.py)")
+parser.add_argument("--name", default=None, help="run folder under outputs/runs/ (default: --run)")
 args = parser.parse_args()
 started = time.time()
 
@@ -48,7 +49,7 @@ started = time.time()
 # `station_day` tables written by scripts/prepare.py (paths.prepared_dir).
 cfg = load_config(args.run, args.paths, json.loads(args.overrides) if args.overrides else None)
 outputs = Path(cfg.paths.outputs_dir)
-run_dir, cache_dir = outputs / "runs" / cfg.run_name, outputs / "cache"
+run_dir, cache_dir = outputs / "runs" / (args.name or cfg.run_name), outputs / "cache"
 run_dir.mkdir(parents=True, exist_ok=True)
 logging.basicConfig(level=cfg.runtime.log_level, format="%(asctime)s %(message)s", datefmt="%H:%M:%S",
                     force=True, handlers=[logging.StreamHandler(),
@@ -177,8 +178,10 @@ log.info("step 8: q = %s fitted to the bin medians by least squares, %s bin weig
 tables, keys["surfaces"] = cached_stage(
     "surfaces", lambda: {"surfaces": fit_surface(bins, fl.classes, b)}, cache_dir, b, keys["bins"], code)
 surfaces = tables["surfaces"]
+# Headline: the sign of dq/dAI = a + c * LAI at each class's median LAI (surface set).
 lai_median = analysis[in_surface].groupby("veg_class")["lai_m2m2"].median()
-surfaces["dq_dai_at_median_lai"] = surfaces["a"] + surfaces["c"] * surfaces["veg_class"].map(lai_median)
+surfaces["lai_median_m2m2"] = surfaces["veg_class"].map(lai_median)
+surfaces["dq_dai_at_median_lai"] = surfaces["a"] + surfaces["c"] * surfaces["lai_median_m2m2"]
 for row in surfaces.itertuples():
     log.info("        %-5s a=%.3f±%.3f b=%.3f±%.3f c=%.3f±%.3f d=%.3f±%.3f R2(bins)=%.2f n_bins=%d [%s]",
              row.veg_class, row.a, row.a_se, row.b, row.b_se, row.c, row.c_se, row.d, row.d_se,
@@ -187,7 +190,9 @@ report.append(("Step 7: bins used", markdown_table(used)))
 report.append(("Step 8: surfaces", markdown_table(surfaces)))
 
 # ── Step 9. Report ─────────────────────────────────────────────────────────────
-summary = {"run": cfg.run_name, "changed": {k: v[1] for k, v in diffs.items()},
+summary = {"run": args.name or cfg.run_name, "base_run": cfg.run_name, "code_hash": code,
+           "overrides": json.loads(args.overrides) if args.overrides else {},
+           "changed": {k: v[1] for k, v in diffs.items()},
            "events_detected": len(events), "events_final": len(final),
            "stations_final": int(final["station_id"].nunique()),
            "events_surface": int(in_surface.sum()),

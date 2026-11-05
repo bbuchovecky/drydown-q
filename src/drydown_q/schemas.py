@@ -85,6 +85,14 @@ SCHEMAS = {
                      "n_events": "int", "fit_status": "str"},
         "extra": {},
     },
+    # One row per sweep configuration; per-class columns are <quantity>_<class>.
+    "summary": {
+        "required": {"run": "str", "changed_key": "str", "changed_value": "str", "status": "str",
+                     "events_final": "float", "stations_final": "float", "events_surface": "float"},
+        "extra": {"median_q_*": "float", "herb_minus_wood_q": "float", "a_*": "float", "b_*": "float",
+                  "c_*": "float", "d_*": "float", "r2_bins_*": "float", "n_bins_*": "float",
+                  "dq_dai_sign_*": "float", "dq_dai_at_median_lai_*": "float", "message": "str"},
+    },
 }
 
 

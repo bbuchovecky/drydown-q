@@ -1,0 +1,7 @@
+# Tiny sweep for `pixi run smoke` on the synthetic dataset (plumbing test, not science).
+base_run: smoke
+mode: one_at_a_time
+changes:
+  filters.r2_min: [0.7, 0.9]
+  binning.min_events_per_bin: [3]
+  events.min_decline_days: [5]

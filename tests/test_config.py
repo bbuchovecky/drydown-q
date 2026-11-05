@@ -76,3 +76,39 @@ def test_section_hash_changes_only_with_its_section(smoke_cfg):
     changed = load_config("smoke", SMOKE_PATHS, overrides={"filters": {"r2_min": 0.8}})
     assert config_hash(changed.filters) != config_hash(smoke_cfg.filters)
     assert config_hash(changed.fitting) == config_hash(smoke_cfg.fitting)
+
+
+def test_sweep_one_at_a_time_drops_baseline_duplicates():
+    from drydown_q.config import load_sweep
+    base, configs = load_sweep("thresholds")
+    labels = [label for label, _ in configs]
+    assert base == "morgan2025" and labels[0] == "baseline"
+    assert "filters.r2_min=0.7" not in labels and "filters.r2_min=0.9" in labels
+    assert "filters.duration_days=6-30" in labels
+    assert len(configs) == 1 + 4 + 5 + 4 + 3 + 2 + 3
+
+
+def _write_sweep(tmp_path, monkeypatch, text):
+    import drydown_q.config as c
+    (tmp_path / "sweeps").mkdir()
+    (tmp_path / "runs").mkdir()
+    (tmp_path / "default.yml").write_text((c.CONFIG_DIR / "default.yml").read_text())
+    (tmp_path / "runs" / "morgan2025.yml").write_text("")
+    (tmp_path / "sweeps" / "t.yml").write_text(text)
+    monkeypatch.setattr(c, "CONFIG_DIR", tmp_path)
+    return c
+
+
+def test_sweep_grid_and_validation(tmp_path, monkeypatch):
+    c = _write_sweep(tmp_path, monkeypatch, "base_run: morgan2025\nmode: grid\nchanges:\n"
+                     "  filters.r2_min: [0.6, 0.8]\n  binning.min_events_per_bin: [3, 10]\n")
+    _, configs = c.load_sweep("t")
+    assert len(configs) == 1 + 4
+    assert ("filters.r2_min=0.8__binning.min_events_per_bin=3",
+            {"filters": {"r2_min": 0.8}, "binning": {"min_events_per_bin": 3}}) in configs
+    (tmp_path / "sweeps" / "t.yml").write_text("base_run: morgan2025\nmode: grid\nchanges:\n  filters.r2_mn: [0.6]\n")
+    with pytest.raises(ConfigError, match="unknown key"):
+        c.load_sweep("t")
+    (tmp_path / "sweeps" / "t.yml").write_text("base_run: morgan2025\nmode: grid\nchanges:\n  filters.r2_min: [high]\n")
+    with pytest.raises(ConfigError, match="does not match type"):
+        c.load_sweep("t")
