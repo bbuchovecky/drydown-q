@@ -28,12 +28,13 @@ import pandas as pd
 
 from drydown_q.binning import bin_medians, fit_surface, surface_set
 from drydown_q.cache import read_stage
-from drydown_q.config import TABLES_DIR, load_config, write_resolved
+from drydown_q.config import TABLES_DIR, load_config, load_sweep, write_resolved
 from drydown_q.covariates import add_derived, assign_class
 from drydown_q.filters import QUALITY_RULES, cascade, flag_filters
 from drydown_q.fitting import fit_event
 from drydown_q.ismn_daily import PERCENT as ismn_percent, file_key, sensor_units
-from drydown_q.report import compare_events, markdown_table, match_sensors, write_report
+from drydown_q.report import (compare_events, markdown_table, match_sensors, specification_curve,
+                              sweep_row, sweep_summary, write_report)
 from drydown_q.soil import sensor_constants
 
 parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
@@ -44,10 +45,14 @@ parser.add_argument("--tier", type=int, choices=[1, 2], default=1)
 parser.add_argument("--check-ismn", action="store_true",
                     help="compare prepare step 1 (sensors, daily theta) with Morgan's metadata and events")
 parser.add_argument("--run", default="morgan2025", help="tier 2: the analyze run to compare")
+parser.add_argument("--sweep", default=None,
+                    help="tier 1: run this sweep's filter/binning configurations on the released fits")
 args = parser.parse_args()
 
 cfg = load_config(args.run if args.tier == 2 else "morgan2025", args.paths)
-run_dir = Path(cfg.paths.outputs_dir) / "runs" / ("check_ismn" if args.check_ismn else f"reproduce_tier{args.tier}")
+run_name = ("check_ismn" if args.check_ismn else f"released_sweep_{args.sweep}" if args.sweep
+            else f"reproduce_tier{args.tier}")
+run_dir = Path(cfg.paths.outputs_dir) / "runs" / run_name
 run_dir.mkdir(parents=True, exist_ok=True)
 logging.basicConfig(level=cfg.runtime.log_level, format="%(asctime)s %(message)s",
                     datefmt="%H:%M:%S", force=True,
@@ -271,6 +276,52 @@ analysis = pd.DataFrame({
 })
 analysis = add_derived(analysis)
 assert np.allclose(analysis["mean_depth_m"], df["z_m"]), "mean depth should equal released z_m"
+
+# ── Released-fits sweep: steps 5-8 for each filter/binning configuration ──────
+# The released table fixes events, fits and covariates, so only configurations
+# that change `filters` or `binning` can run here; the others are recorded as
+# skipped (they need the full pipeline: pixi run sweep).
+if args.sweep:
+    sweep_base, configs = load_sweep(args.sweep)
+    if sweep_base != "morgan2025":
+        raise SystemExit(f"sweep {args.sweep} has base run {sweep_base}; the released fits are morgan2025")
+    classes = cfg.filters.classes
+    rows = []
+    for label, overrides in configs:
+        upstream = sorted(set(overrides) - {"filters", "binning"})
+        if upstream:
+            rows.append(sweep_row(label, overrides, "skipped",
+                                  f"changes {', '.join(upstream)}: needs the full pipeline", None, classes))
+            continue
+        c = load_config(sweep_base, args.paths, overrides)
+        flagged = flag_filters(analysis, c.filters)
+        final = flagged[flagged["in_final_set"]]
+        in_surface = surface_set(flagged, c.filters.lai_min_m2m2, c.binning.lai_min_inclusive_surface)
+        surfaces = fit_surface(bin_medians(flagged[in_surface], c.filters.classes, c.binning),
+                               c.filters.classes, c.binning)
+        lai_median = flagged[in_surface].groupby("veg_class")["lai_m2m2"].median()
+        surfaces["dq_dai_at_median_lai"] = surfaces["a"] + surfaces["c"] * surfaces["veg_class"].map(lai_median)
+        result = {"events_final": len(final), "stations_final": final["station_id"].nunique(),
+                  "events_surface": int(in_surface.sum()),
+                  "median_q": final.groupby("veg_class")["q"].median().to_dict(),
+                  "surfaces": surfaces.set_index("veg_class").to_dict("index")}
+        rows.append(sweep_row(label, overrides, "ok", "", result, classes))
+        log.info("  %-34s %6d events  HERB %.3f SAV %.3f WOOD %.3f", label, len(final),
+                 *[result["median_q"].get(k, np.nan) for k in classes])
+    summary = sweep_summary(rows)
+    summary.to_parquet(run_dir / "summary.parquet", index=False)
+    figure = specification_curve(summary, classes, run_dir / "specification_curve.png",
+                                 f"Specification curve: sweep {args.sweep} on the released Morgan et al. fits")
+    shown = ["run", "status", "events_final", "events_surface", *[f"median_q_{k}" for k in classes],
+             "herb_minus_wood_q", *[f"a_{k}" for k in classes], *[f"r2_bins_{k}" for k in classes],
+             *[f"dq_dai_sign_{k}" for k in classes]]
+    report = write_report(run_dir / "report.md", f"Sweep `{args.sweep}` on the released fits (steps 5-8)", [
+        ("Summary", markdown_table(summary[[c for c in shown if c in summary]], "{:.3f}")),
+        ("Figure", f"![specification curve]({figure.name})"),
+        ("Notes", "Events, fits and covariates are the released ones (tier 1 recipe); only the filter and "
+                  "binning settings vary. Configurations that change event detection are skipped here.")])
+    log.info("summary %s; figure %s; report %s", run_dir / "summary.parquet", figure, report)
+    sys.exit(0)
 
 # ── Steps 5-8 exactly as analyze.py runs them ─────────────────────────────────
 analysis = flag_filters(analysis, cfg.filters)

@@ -7,9 +7,11 @@ import platform
 import time
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 
 from drydown_q.config import Config, as_dict
+from drydown_q.schemas import assert_schema
 
 PACKAGES = ["numpy", "pandas", "scipy", "xarray", "netCDF4", "pyarrow", "matplotlib",
             "pyyaml", "joblib", "ismn", "drydown-q"]
@@ -138,3 +140,88 @@ def match_sensors(ours: pd.DataFrame, theirs: pd.DataFrame) -> pd.DataFrame:
     out = pd.concat([name, depth], ignore_index=True)
     return out[["sensor_id", "network", "their_station", "their_sensor", "match"]].rename(
         columns={"sensor_id": "our_sensor_id"})
+
+
+# ── Sweep summaries (sweep.py, reproduce.py --sweep) ──────────────────────────
+SURFACE_FIELDS = ["a", "b", "c", "d", "r2_bins", "n_bins", "dq_dai_at_median_lai"]
+
+
+def sweep_row(label: str, overrides: dict, status: str, message: str, result: dict | None,
+              classes: list[str]) -> dict:
+    """One ``summary`` row. ``result`` has events_final, stations_final,
+    events_surface, median_q {class: q} and surfaces {class: {a, b, ...}}."""
+    changed = {f"{s}.{k}": v for s, kv in overrides.items() if s != "runtime" for k, v in kv.items()}
+    row = {"run": label, "changed_key": ", ".join(changed) or "(baseline)",
+           "changed_value": ", ".join(json.dumps(v) for v in changed.values()),
+           "status": status, "message": message,
+           "events_final": np.nan, "stations_final": np.nan, "events_surface": np.nan}
+    if result is not None:
+        row.update({k: result[k] for k in ("events_final", "stations_final", "events_surface")})
+        for c in classes:
+            row[f"median_q_{c}"] = result["median_q"].get(c, np.nan)
+            surf = result["surfaces"].get(c, {})
+            for k in SURFACE_FIELDS:
+                row[f"{k}_{c}"] = surf.get(k, np.nan)
+            # Headline: the sign of dq/dAI = a + c * LAI at the class median LAI.
+            row[f"dq_dai_sign_{c}"] = np.sign(row[f"dq_dai_at_median_lai_{c}"])
+    return row
+
+
+def sweep_summary(rows: list[dict]) -> pd.DataFrame:
+    """The ``summary`` table, with the headline grassland - woodland contrast."""
+    summary = pd.DataFrame(rows)
+    if {"median_q_HERB", "median_q_WOOD"} <= set(summary.columns):
+        summary["herb_minus_wood_q"] = summary["median_q_HERB"] - summary["median_q_WOOD"]
+    for column in summary.columns:
+        if column not in ("run", "changed_key", "changed_value", "status", "message"):
+            summary[column] = summary[column].astype(float)
+    assert_schema(summary, "summary")
+    return summary
+
+
+def specification_curve(summary: pd.DataFrame, classes: list[str], path: Path, title: str) -> Path:
+    """Each headline result against run rank, with the varied setting of each
+    run as a dot matrix underneath. Runs are ranked by the HERB - WOOD median-q
+    difference (all panels share that order); the baseline is a dashed line."""
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    ok = summary[summary["status"] == "ok"].copy()
+    order = "herb_minus_wood_q" if "herb_minus_wood_q" in ok else f"median_q_{classes[0]}"
+    ok = ok.sort_values(order, ignore_index=True)
+    x = np.arange(len(ok))
+    panels = [("median q", [f"median_q_{c}" for c in classes]), ("HERB − WOOD q", ["herb_minus_wood_q"]),
+              *[(f"surface {k}", [f"{k}_{c}" for c in classes]) for k in ["a", "b", "c", "d"]],
+              ("R² on bins", [f"r2_bins_{c}" for c in classes]),
+              ("sign ∂q/∂AI at median LAI", [f"dq_dai_sign_{c}" for c in classes])]
+    settings = [k for k in dict.fromkeys(ok["changed_key"]) if k != "(baseline)"]
+    fig, axes = plt.subplots(len(panels) + 1, 1, sharex=True,
+                             figsize=(max(6, 0.35 * len(ok) + 2), 2 * len(panels) + 3),
+                             gridspec_kw={"height_ratios": [1] * len(panels) + [max(1, 0.25 * len(settings))]})
+    base_x = x[ok["run"] == "baseline"]
+    colours = dict(zip(classes, plt.rcParams["axes.prop_cycle"].by_key()["color"]))
+    for ax, (panel_title, columns) in zip(axes, panels):
+        for column in columns:
+            if column in ok:
+                veg_class = column.rsplit("_", 1)[-1]
+                ax.plot(x, ok[column], "o", ms=4, color=colours.get(veg_class, "k"), label=veg_class)
+        for bx in base_x:
+            ax.axvline(bx, color="0.6", lw=0.8, ls="--")
+        ax.set_ylabel(panel_title, fontsize=8)
+    axes[0].legend(fontsize=7, ncol=len(classes), loc="lower left", bbox_to_anchor=(0, 1.02), frameon=False)
+    matrix = axes[-1]
+    for i, row in ok.iterrows():
+        if row["changed_key"] in settings:
+            matrix.plot(i, settings.index(row["changed_key"]), "ks", ms=5)
+            matrix.annotate(row["changed_value"], (i, settings.index(row["changed_key"])), fontsize=6,
+                            xytext=(0, 5), textcoords="offset points", ha="center")
+    matrix.set_yticks(range(len(settings)), settings, fontsize=7)
+    matrix.set_ylim(-1, len(settings))
+    matrix.set_xticks(x)
+    matrix.set_xlabel(f"run rank (by {order}); dashed line = baseline", fontsize=8)
+    fig.suptitle(title, fontsize=10)
+    fig.tight_layout(rect=(0, 0, 1, 0.98))
+    fig.savefig(path, dpi=150)
+    plt.close(fig)
+    return Path(path)

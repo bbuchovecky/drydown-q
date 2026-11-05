@@ -24,16 +24,10 @@ import subprocess
 import sys
 from pathlib import Path
 
-import matplotlib
-import numpy as np
-import pandas as pd
 from joblib import Parallel, delayed
 
 from drydown_q.config import REPO_ROOT, code_hash, load_config, load_sweep
-from drydown_q.schemas import assert_schema
-
-matplotlib.use("Agg")
-import matplotlib.pyplot as plt  # noqa: E402  (backend must be set first)
+from drydown_q.report import specification_curve, sweep_row, sweep_summary
 
 parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
 parser.add_argument("--sweep", required=True, help="sweep name: config/sweeps/<sweep>.yml")
@@ -82,74 +76,16 @@ outcomes += Parallel(n_jobs=cfg.runtime.n_jobs)(delayed(run_one)(label, ov, 1) f
 for o in outcomes[1:]:
     log.info("  %s: %s %s", o["label"], o["status"], o["message"])
 
-# ── Summary table ─────────────────────────────────────────────────────────────
+# ── Summary table and specification curve ─────────────────────────────────────
 rows = []
 for (label, overrides), outcome in zip(configs, outcomes):
-    changed = {f"{s}.{k}": v for s, kv in overrides.items() for k, v in kv.items()}
-    row = {"run": label, "changed_key": ", ".join(changed) or "(baseline)",
-           "changed_value": ", ".join(json.dumps(v) for v in changed.values()),
-           "status": outcome["status"], "message": outcome["message"],
-           "events_final": np.nan, "stations_final": np.nan, "events_surface": np.nan}
     summary_file = sweep_dir / label / "summary.json"
-    if outcome["status"] == "ok" and summary_file.exists():
-        s = json.loads(summary_file.read_text())
-        row.update(events_final=s["events_final"], stations_final=s["stations_final"],
-                   events_surface=s["events_surface"])
-        for c in classes:
-            row[f"median_q_{c}"] = s["median_q"].get(c, np.nan)
-            surf = s["surfaces"].get(c, {})
-            for k in ["a", "b", "c", "d", "r2_bins", "n_bins", "dq_dai_at_median_lai"]:
-                row[f"{k}_{c}"] = surf.get(k, np.nan)
-            row[f"dq_dai_sign_{c}"] = np.sign(row[f"dq_dai_at_median_lai_{c}"])
-    rows.append(row)
-summary = pd.DataFrame(rows)
-# Headline contrast: grassland minus woodland median q (the paper's HERB vs WOOD).
-if {"median_q_HERB", "median_q_WOOD"} <= set(summary.columns):
-    summary["herb_minus_wood_q"] = summary["median_q_HERB"] - summary["median_q_WOOD"]
-for column in summary.columns:
-    if column not in ("run", "changed_key", "changed_value", "status", "message"):
-        summary[column] = summary[column].astype(float)
-assert_schema(summary, "summary")
+    result = json.loads(summary_file.read_text()) if outcome["status"] == "ok" and summary_file.exists() else None
+    rows.append(sweep_row(label, overrides, outcome["status"], outcome["message"], result, classes))
+summary = sweep_summary(rows)
 summary.to_parquet(sweep_dir / "summary.parquet", index=False)
 log.info("summary: %s (%d ok, %d failed)", sweep_dir / "summary.parquet",
          (summary.status == "ok").sum(), (summary.status != "ok").sum())
-
-# ── Specification curve ───────────────────────────────────────────────────────
-# Runs are ranked by the HERB - WOOD difference in median q (all panels share
-# that order); the dot matrix below marks which setting each run changes.
-ok = summary[summary.status == "ok"].copy()
-order = "herb_minus_wood_q" if "herb_minus_wood_q" in ok else f"median_q_{classes[0]}"
-ok = ok.sort_values(order, ignore_index=True)
-x = np.arange(len(ok))
-panels = [("median q", [f"median_q_{c}" for c in classes]), ("HERB − WOOD q", ["herb_minus_wood_q"]),
-          *[(f"surface {k}", [f"{k}_{c}" for c in classes]) for k in ["a", "b", "c", "d"]],
-          ("R² on bins", [f"r2_bins_{c}" for c in classes]),
-          ("sign ∂q/∂AI at median LAI", [f"dq_dai_sign_{c}" for c in classes])]
-settings = [k for k in dict.fromkeys(ok["changed_key"]) if k != "(baseline)"]
-fig, axes = plt.subplots(len(panels) + 1, 1, sharex=True, figsize=(max(6, 0.35 * len(ok) + 2), 2 * len(panels) + 3),
-                         gridspec_kw={"height_ratios": [1] * len(panels) + [max(1, 0.25 * len(settings))]})
-base_x = x[ok["run"] == "baseline"]
-colours = dict(zip(classes, plt.rcParams["axes.prop_cycle"].by_key()["color"]))
-for ax, (title, columns) in zip(axes, panels):
-    for column in columns:
-        if column in ok:
-            veg_class = column.rsplit("_", 1)[-1]
-            ax.plot(x, ok[column], "o", ms=4, color=colours.get(veg_class, "k"), label=veg_class)
-    for bx in base_x:
-        ax.axvline(bx, color="0.6", lw=0.8, ls="--")
-    ax.set_ylabel(title, fontsize=8)
-axes[0].legend(fontsize=7, ncol=len(classes), loc="lower left", bbox_to_anchor=(0, 1.02), frameon=False)
-matrix = axes[-1]
-for i, row in ok.iterrows():
-    if row["changed_key"] in settings:
-        matrix.plot(i, settings.index(row["changed_key"]), "ks", ms=5)
-        matrix.annotate(row["changed_value"], (i, settings.index(row["changed_key"])), fontsize=6,
-                        xytext=(0, 5), textcoords="offset points", ha="center")
-matrix.set_yticks(range(len(settings)), settings, fontsize=7)
-matrix.set_ylim(-1, len(settings))
-matrix.set_xticks(x)
-matrix.set_xlabel(f"run rank (by {order}); dashed line = baseline", fontsize=8)
-fig.suptitle(f"Specification curve: sweep {args.sweep} (base run {base_run})", fontsize=10)
-fig.tight_layout(rect=(0, 0, 1, 0.98))
-fig.savefig(sweep_dir / "specification_curve.png", dpi=150)
-log.info("figure: %s", sweep_dir / "specification_curve.png")
+figure = specification_curve(summary, classes, sweep_dir / "specification_curve.png",
+                             f"Specification curve: sweep {args.sweep} (base run {base_run})")
+log.info("figure: %s", figure)

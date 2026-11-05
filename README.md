@@ -83,6 +83,11 @@ first and fills the shared cache; the rest run in parallel, so a configuration t
 changes only filters or binning reuses the base events and fits. A completed
 configuration is skipped on rerun; a failed one is recorded and the sweep continues.
 
+`python scripts/reproduce.py --sweep thresholds` runs the same sweep's filter and binning
+configurations on the released Morgan et al. fits (tier 1 inputs, steps 5–8) and writes
+`outputs/runs/released_sweep_thresholds/`; configurations that change event detection
+are recorded as skipped.
+
 ## Reproduction
 
 `pixi run reproduce` runs tier 1: the released Morgan et al. results table is used
