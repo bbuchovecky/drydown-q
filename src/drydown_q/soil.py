@@ -66,19 +66,27 @@ def _round_to(values: np.ndarray, step: float | None) -> np.ndarray:
     return np.array([round(v, decimals) if np.isfinite(v) else v for v in values], dtype=float)
 
 
-def wilting_point(theta_daily: pd.Series, cfg: Soil) -> float:
-    """theta_w [m3 m-3] of one sensor from its daily theta.
+def wilting_point(theta_daily: pd.Series, dates: pd.Series, cfg: Soil) -> tuple[float, str]:
+    """theta_w [m3 m-3] of one sensor from its daily theta, and the rule applied.
 
     ``record_min``: minimum over the sensor record (Morgan: theta_w = min_sm).
     ``quantile``: the ``theta_w_quantile`` quantile of daily theta.
+    ``seasonal_min``: the median over calendar years of each year's minimum daily
+        theta, using only years with at least ``theta_w_min_days_per_year`` valid
+        days; if no year qualifies, the record minimum (``record_min_fallback``).
     """
     if cfg.theta_w_rule == "record_min":
-        return float(theta_daily.min())
+        return float(theta_daily.min()), "record_min"
     if cfg.theta_w_rule == "quantile":
         if cfg.theta_w_quantile is None:
             raise ValueError("soil.theta_w_rule = quantile needs soil.theta_w_quantile")
-        return float(theta_daily.quantile(cfg.theta_w_quantile))
-    raise ValueError(f"soil.theta_w_rule = {cfg.theta_w_rule!r} is not defined yet")
+        return float(theta_daily.quantile(cfg.theta_w_quantile)), "quantile"
+    valid = pd.DataFrame({"theta": theta_daily.to_numpy(), "year": pd.to_datetime(dates).dt.year.to_numpy()}).dropna()
+    yearly = valid.groupby("year")["theta"].agg(["min", "size"])
+    full = yearly[yearly["size"] >= cfg.theta_w_min_days_per_year]
+    if full.empty:
+        return float(theta_daily.min()), "record_min_fallback"
+    return float(full["min"].median()), "seasonal_min"
 
 
 def layer_depth(sensors: pd.DataFrame, cfg: Soil) -> pd.Series:
@@ -118,7 +126,9 @@ def sensor_constants(sensors: pd.DataFrame, station_day: pd.DataFrame, cfg: Soil
     theta = station_day.groupby("sensor_id")["theta_m3m3"]
     stats = pd.DataFrame({"max_sm_m3m3": theta.quantile(cfg.max_sm_quantile),
                           "min_sm_m3m3": theta.min()})
-    stats["theta_w_m3m3"] = [wilting_point(g, cfg) for _, g in theta]
+    w = [wilting_point(g["theta_m3m3"], g["date"], cfg) for _, g in station_day.groupby("sensor_id")]
+    stats["theta_w_m3m3"] = [v for v, _ in w]
+    stats["theta_w_source"] = [src for _, src in w]
     out = sensors[["sensor_id"]].join(stats, on="sensor_id")
     if cfg.theta_fc_rule == "clapp_hornberger":
         fc = field_capacity(sensors["texture_class"], cfg)
@@ -128,5 +138,6 @@ def sensor_constants(sensors: pd.DataFrame, station_day: pd.DataFrame, cfg: Soil
     out["theta_fc_m3m3"] = fc.fillna(out["max_sm_m3m3"])
     out["dz_m"] = layer_depth(sensors, cfg)
     out["theta_fc_source"] = out["theta_fc_source"].astype(str)
+    out["theta_w_source"] = out["theta_w_source"].astype(str)
     return out[["sensor_id", "theta_fc_m3m3", "theta_fc_source", "max_sm_m3m3",
-                "min_sm_m3m3", "theta_w_m3m3", "dz_m"]].reset_index(drop=True)
+                "min_sm_m3m3", "theta_w_m3m3", "theta_w_source", "dz_m"]].reset_index(drop=True)

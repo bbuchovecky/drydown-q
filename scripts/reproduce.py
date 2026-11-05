@@ -32,7 +32,7 @@ from drydown_q.config import TABLES_DIR, load_config, load_sweep, write_resolved
 from drydown_q.covariates import add_derived, assign_class
 from drydown_q.filters import QUALITY_RULES, cascade, flag_filters
 from drydown_q.fitting import fit_event
-from drydown_q.ismn_daily import PERCENT as ismn_percent, file_key, sensor_units
+from drydown_q.ismn_daily import PERCENT as ismn_percent, daily_dir_name, file_key, sensor_units
 from drydown_q.report import (compare_events, markdown_table, match_sensors, specification_curve,
                               sweep_row, sweep_summary, write_report)
 from drydown_q.soil import sensor_constants
@@ -72,7 +72,7 @@ ours = []   # (check, veg_class, quantity, value)
 if args.check_ismn:
     work = Path(cfg.paths.prepared_dir) / "work"
     ours, _ = sensor_units(pd.read_parquet(work / "ismn_sensors.parquet"), cfg.prepare.sensor_unit)
-    daily_dir = work / f"daily_{cfg.prepare.sensor_unit}"
+    daily_dir = work / daily_dir_name(cfg.prepare)
     meta = pd.read_csv(data / "ISMN" / "metadata.csv")
     meta = meta[meta["variable"] == "soil_moisture"].rename(
         columns={"depth_from": "depth_top_m", "depth_to": "depth_bottom_m"})

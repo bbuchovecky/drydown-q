@@ -34,6 +34,7 @@ Number = int | float
 @dataclass(frozen=True)
 class Prepare:
     sensor_unit: Literal["probe", "file"]
+    exclude_snow_frozen: bool
     ismn_flags_kept: list[str]
     day_definition: Literal["utc"]
     min_valid_hours: int
@@ -58,6 +59,7 @@ class Soil:
     max_sm_quantile: Number
     theta_w_rule: Literal["record_min", "quantile", "seasonal_min"]
     theta_w_quantile: Number | None
+    theta_w_min_days_per_year: int
     dz_rule: Literal["depth_bottom", "layer_thickness", "fixed"]
     dz_fixed_m: Number | None
 
@@ -72,8 +74,8 @@ class Events:
     precip_check: Literal["start_window", "whole_event"]
     precip_missing_is_dry: bool
     precip_source: Literal["chirps", "insitu_then_chirps"]
+    insitu_wet_day_ratio_max: Number
     gap_rule: Literal["end_event"]
-    exclude_snow_frozen: bool
 
 
 @dataclass(frozen=True)

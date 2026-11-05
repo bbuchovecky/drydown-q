@@ -34,7 +34,7 @@ and the fit drops the missing ones. ``t_days`` counts days since the start.
 import numpy as np
 import pandas as pd
 
-from drydown_q.config import Events
+from drydown_q.config import TABLES_DIR, Events
 
 
 def masked_series(theta: pd.Series, theta_fc: float, mask_above_fc: bool) -> pd.Series:
@@ -110,17 +110,53 @@ def detect_sensor(day: pd.DataFrame, theta_fc: float, dz_m: float, cfg: Events) 
     return out
 
 
+def choose_precip(station_day: pd.DataFrame, cfg: Events) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Precipitation for the rain checks, per sensor, and a record of the choice.
+
+    ``precip_source = chirps``: CHIRPS everywhere (Morgan).
+    ``precip_source = insitu_then_chirps``: the station gauge (``precip_insitu_mm``)
+    where it has a value, CHIRPS otherwise, but only for gauges that pass:
+      - the network is not in data/tables/insitu_precip_excluded_networks.csv;
+      - on days both have, the gauge's wet-day share (P > precip_max_mm_day) is
+        within a factor ``insitu_wet_day_ratio_max`` of CHIRPS's (both zero passes).
+    A sensor whose gauge fails uses CHIRPS. Returns the station_day with
+    ``precip_mm`` replaced, and ``precip_sources`` (one row per sensor).
+    """
+    sensors = station_day["sensor_id"].unique()
+    if cfg.precip_source == "chirps":
+        return station_day, pd.DataFrame({"sensor_id": sensors.astype(str), "source": "chirps", "reason": "",
+                                          "gauge_wet_share": np.nan, "chirps_wet_share": np.nan})
+    if "precip_insitu_mm" not in station_day:
+        raise ValueError("events.precip_source = insitu_then_chirps needs station_day.precip_insitu_mm")
+    excluded = set(pd.read_csv(TABLES_DIR / "insitu_precip_excluded_networks.csv")["network"])
+    both = station_day.dropna(subset=["precip_insitu_mm", "precip_mm"])
+    wet = both.assign(gauge=both["precip_insitu_mm"] > cfg.precip_max_mm_day,
+                      chirps=both["precip_mm"] > cfg.precip_max_mm_day).groupby("sensor_id")[["gauge", "chirps"]].mean()
+    rows = []
+    for sid in sensors:
+        network = sid.split("/")[0]
+        g, c = (wet.loc[sid, "gauge"], wet.loc[sid, "chirps"]) if sid in wet.index else (np.nan, np.nan)
+        r = cfg.insitu_wet_day_ratio_max
+        if network in excluded:
+            source, reason = "chirps", "network excluded (insitu_precip_excluded_networks.csv)"
+        elif np.isnan(g):
+            source, reason = "chirps", "no gauge days in common with CHIRPS"
+        elif (g == 0 and c == 0) or (c > 0 and 1 / r <= g / c <= r):
+            source, reason = "insitu_then_chirps", ""
+        else:
+            source, reason = "chirps", "gauge wet-day share outside insitu_wet_day_ratio_max of CHIRPS"
+        rows.append({"sensor_id": sid, "source": source, "reason": reason,
+                     "gauge_wet_share": float(g), "chirps_wet_share": float(c)})
+    sources = pd.DataFrame(rows).astype({"sensor_id": str, "source": str, "reason": str})
+    use = station_day["sensor_id"].isin(sources.loc[sources["source"] == "insitu_then_chirps", "sensor_id"])
+    precip = station_day["precip_mm"].where(~use, station_day["precip_insitu_mm"].fillna(station_day["precip_mm"]))
+    return station_day.assign(precip_mm=precip), sources
+
+
 def find_events(station_day: pd.DataFrame, constants: pd.DataFrame, cfg: Events
                 ) -> dict[str, pd.DataFrame]:
-    """The ``events`` and ``event_days`` tables for all sensors."""
-    if cfg.exclude_snow_frozen:
-        raise ValueError("events.exclude_snow_frozen = true is not implemented (needs a snow/frozen rule)")
-    # Precipitation for the rain checks: CHIRPS (precip_source = chirps), or the
-    # station's own gauge where it has a value, CHIRPS otherwise (insitu_then_chirps).
-    if cfg.precip_source == "insitu_then_chirps":
-        if "precip_insitu_mm" not in station_day:
-            raise ValueError("events.precip_source = insitu_then_chirps needs station_day.precip_insitu_mm")
-        station_day = station_day.assign(precip_mm=station_day["precip_insitu_mm"].fillna(station_day["precip_mm"]))
+    """The ``events``, ``event_days`` and ``precip_sources`` tables for all sensors."""
+    station_day, precip_sources = choose_precip(station_day, cfg)
     consts = constants.set_index("sensor_id")
     events, days = [], []
     for sensor_id, day in station_day.groupby("sensor_id", sort=True):
@@ -150,4 +186,4 @@ def find_events(station_day: pd.DataFrame, constants: pd.DataFrame, cfg: Events
                   pd.DataFrame({"event_id": pd.Series(dtype=str), "t_days": pd.Series(dtype="int64"),
                                 "theta_m3m3": pd.Series(dtype=float), "pet_mm": pd.Series(dtype=float)}))
     event_days["event_id"] = event_days["event_id"].astype(str)
-    return {"events": events, "event_days": event_days}
+    return {"events": events, "event_days": event_days, "precip_sources": precip_sources}

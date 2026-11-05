@@ -144,6 +144,7 @@ Units are in the column names. Filters add columns and never drop rows.
 | `theta_fc_source` | str | `clapp_hornberger` or `max_sm` (fallback) |
 | `max_sm_m3m3`, `min_sm_m3m3` | float | quantile maximum and minimum of daily θ [m³ m⁻³] |
 | `theta_w_m3m3` | float | wilting point used by the models [m³ m⁻³] |
+| `theta_w_source` | str | rule applied: `record_min`, `quantile`, `seasonal_min` or `record_min_fallback` |
 | `dz_m` | float | layer depth Δz [m] |
 
 ### `events`: one drydown
@@ -157,6 +158,11 @@ Units are in the column names. Filters add columns and never drop rows.
 | `n_obs` | int | non-missing days fitted |
 | `n_days_above_fc` | int | days in the event with raw θ > θ_fc |
 | `end_reason` | str | `decline_below_threshold`, `gap`, `record_end` or (with `precip_check = whole_event`) `rain` |
+
+### `precip_sources`: one sensor (step 2)
+
+`sensor_id`, `source` (`chirps` or `insitu_then_chirps`), `reason` (why a gauge was not used),
+`gauge_wet_share`, `chirps_wet_share` (share of common days with P > `precip_max_mm_day`).
 
 ### `event_days`: one day in one event
 

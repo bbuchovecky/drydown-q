@@ -11,6 +11,7 @@
 
 prepare:
   sensor_unit: probe                  # probe = join a probe's ISMN period files (_<probe>_<period>) into one record (Morgan's unit) | file
+  exclude_snow_frozen: false          # if true, drop records flagged D01/D02/D03 (soil, air, GLDAS soil temperature < 0 C) even if their flags are kept
   ismn_flags_kept: [G]                # ISMN quality flags kept (G = good); other flags become NaN
   day_definition: utc                 # daily means are over UTC calendar dates
   min_valid_hours: 1                  # [h] minimum valid hourly values for a daily mean (Morgan: no minimum)
@@ -31,8 +32,9 @@ soil:
   rho_water_kg_m3: 1000               # [kg m-3] water density, converts C&H tension heads to potential (Morgan's value)
   g_m_s2: 9.8                         # [m s-2] gravitational acceleration, same conversion (Morgan's value)
   max_sm_quantile: 0.98               # [-] max_sm = this quantile of the sensor's daily theta
-  theta_w_rule: record_min            # theta_w: record_min (Morgan) | quantile | seasonal_min
+  theta_w_rule: record_min            # theta_w: record_min (Morgan) | quantile | seasonal_min (median of annual minima)
   theta_w_quantile: null              # [-] quantile of daily theta used when theta_w_rule = quantile
+  theta_w_min_days_per_year: 182      # [d] seasonal_min: only calendar years with at least this many valid days count
   dz_rule: depth_bottom               # layer depth dz: depth_bottom = sensor depth_to (Morgan) | layer_thickness | fixed
   dz_fixed_m: null                    # [m] dz used when dz_rule = fixed
 
@@ -44,9 +46,9 @@ events:
   precip_max_mm_day: 2                # [mm d-1] a candidate day needs P <= this
   precip_check: start_window          # where rain is checked: start_window (Morgan) | whole_event (a rain day also ends an event)
   precip_missing_is_dry: true         # missing precipitation counts as P = 0
-  precip_source: chirps               # chirps (Morgan) | insitu_then_chirps (ISMN gauges have no QC rule yet: some networks report accumulations)
+  precip_source: chirps               # chirps (Morgan) | insitu_then_chirps (gauge QC: insitu_wet_day_ratio_max and data/tables/insitu_precip_excluded_networks.csv)
+  insitu_wet_day_ratio_max: 2         # [-] a gauge is used only if its wet-day share (P > precip_max_mm_day) is within this factor of CHIRPS's
   gap_rule: end_event                 # a missing day ends an event
-  exclude_snow_frozen: false          # if true, drop days flagged as snow/frozen before detection
 
 fitting:
   models: [exponential, q_stage2]     # models fitted to every event

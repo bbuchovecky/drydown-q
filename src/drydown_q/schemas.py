@@ -38,7 +38,7 @@ SCHEMAS = {
         "required": {
             "sensor_id": "str", "theta_fc_m3m3": "float", "theta_fc_source": "str",
             "max_sm_m3m3": "float", "min_sm_m3m3": "float", "theta_w_m3m3": "float",
-            "dz_m": "float",
+            "theta_w_source": "str", "dz_m": "float",
         },
         "extra": {},
     },
@@ -48,6 +48,11 @@ SCHEMAS = {
             "end_date": "date", "duration_days": "int", "n_obs": "int",
             "n_days_above_fc": "int", "end_reason": "str",
         },
+        "extra": {},
+    },
+    "precip_sources": {
+        "required": {"sensor_id": "str", "source": "str", "reason": "str",
+                     "gauge_wet_share": "float", "chirps_wet_share": "float"},
         "extra": {},
     },
     "event_days": {

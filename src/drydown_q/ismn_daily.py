@@ -112,8 +112,26 @@ def read_hourly(ds: ISMN_Interface, network: str, station: str, sensor_name: str
                          "flag": data[f"{VARIABLE}_flag"].astype(str).to_numpy()})
 
 
-def daily_means(hourly: pd.DataFrame, flags_kept: list[str], min_valid_hours: int) -> pd.DataFrame:
-    """UTC daily mean theta of the records whose ISMN flag is in ``flags_kept``.
+# ISMN soil moisture flags for frozen conditions (ISMN_qualityflags_description.txt):
+# D01 in situ soil temperature < 0 C, D02 in situ air temperature < 0 C, D03 GLDAS
+# soil temperature < 0 C.
+FROZEN_FLAGS = {"D01", "D02", "D03"}
+
+
+def kept_records(flags: pd.Series, flags_kept: list[str], exclude_frozen: bool) -> pd.Series:
+    """True for records whose every ISMN flag (records can carry several, e.g.
+    "D01,D02") is in ``flags_kept``; with ``exclude_frozen`` (prepare.exclude_snow_frozen),
+    records carrying any of FROZEN_FLAGS are dropped even if those flags are kept."""
+    parts = flags.astype(str).str.split(",")
+    keep = parts.map(lambda f: all(x in flags_kept for x in f))
+    if exclude_frozen:
+        keep &= ~parts.map(lambda f: any(x in FROZEN_FLAGS for x in f))
+    return keep.astype(bool)
+
+
+def daily_means(hourly: pd.DataFrame, flags_kept: list[str], min_valid_hours: int,
+                exclude_frozen: bool) -> pd.DataFrame:
+    """UTC daily mean theta of the kept records (``kept_records``).
 
         theta_day = mean(theta_h : flag_h in flags_kept, theta_h not NaN)   [m3 m-3]
         n_valid_hours = number of those records
@@ -123,7 +141,7 @@ def daily_means(hourly: pd.DataFrame, flags_kept: list[str], min_valid_hours: in
     The result has one row for every day from the first to the last kept
     record; days without kept records are NaN with n_valid_hours = 0.
     """
-    kept = hourly[hourly["flag"].isin(flags_kept) & hourly["theta_m3m3"].notna()]
+    kept = hourly[kept_records(hourly["flag"], flags_kept, exclude_frozen) & hourly["theta_m3m3"].notna()]
     if kept.empty:
         return pd.DataFrame({"date": pd.Series(dtype="datetime64[ns]"),
                              "theta_m3m3": pd.Series(dtype=float),
@@ -138,7 +156,8 @@ def daily_means(hourly: pd.DataFrame, flags_kept: list[str], min_valid_hours: in
 
 
 def write_daily_files(archive: Path, meta_path: Path, sensors: pd.DataFrame, members: pd.DataFrame,
-                      flags_kept: list[str], min_valid_hours: int, out_dir: Path) -> list[dict]:
+                      flags_kept: list[str], min_valid_hours: int, exclude_frozen: bool,
+                      out_dir: Path) -> list[dict]:
     """Write ``out_dir/<file_key>.parquet`` (date, theta_m3m3, n_valid_hours) for
     each sensor in ``sensors`` that does not have one yet. A sensor's files
     (``members``) are read in period order and joined; consecutive period files
@@ -156,7 +175,7 @@ def write_daily_files(archive: Path, meta_path: Path, sensors: pd.DataFrame, mem
         try:
             parts = [read_hourly(ds, f.network, f.station, f.sensor) for f in files_of[s.sensor_id].itertuples()]
             hourly = pd.concat(parts, ignore_index=True).drop_duplicates("time", keep="first")
-            daily = daily_means(hourly, flags_kept, min_valid_hours)
+            daily = daily_means(hourly, flags_kept, min_valid_hours, exclude_frozen)
         except (OSError, ValueError, KeyError, IndexError) as err:
             failures.append({"id": s.sensor_id, "step": "ismn_daily",
                              "message": f"{type(err).__name__}: {err}"})
@@ -180,7 +199,7 @@ def insitu_precip(ds: ISMN_Interface, flags_kept: list[str]) -> pd.DataFrame:
     daily = []
     for net, stat, sens in ds.collection.iter_sensors(variable="precipitation"):
         data = sens.read_data()
-        kept = data[data["precipitation_flag"].astype(str).isin(flags_kept)]["precipitation"].astype(float)
+        kept = data[kept_records(data["precipitation_flag"], flags_kept, False)]["precipitation"].astype(float)
         if kept.empty:
             continue
         sums = kept.groupby(pd.to_datetime(kept.index).floor("D")).sum(min_count=1)
@@ -191,3 +210,11 @@ def insitu_precip(ds: ISMN_Interface, flags_kept: list[str]) -> pd.DataFrame:
                              "precip_insitu_mm": pd.Series(dtype=float)})
     out = pd.concat(daily, ignore_index=True)
     return out.groupby(["station_id", "date"], as_index=False)["precip_insitu_mm"].mean()
+
+
+def daily_dir_name(cfg) -> str:
+    """Folder (under prepared_dir/work) of the per-sensor daily files for the
+    settings that determine them, so changing one of them never reuses stale files."""
+    from drydown_q.config import config_hash
+    return f"daily_{cfg.sensor_unit}_" + config_hash(cfg.ismn_flags_kept, cfg.min_valid_hours,
+                                                     cfg.exclude_snow_frozen)

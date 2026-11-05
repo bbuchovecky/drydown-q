@@ -95,6 +95,7 @@ log.info("step 2: start = %d consecutive days with dtheta < -%g mm/d / (1000 dz)
 tables, keys["events"] = cached_stage(
     "events", lambda: find_events(station_day, constants, e), cache_dir, e, keys["sensor_constants"], code)
 events, event_days = tables["events"], tables["event_days"]
+log.info("        precipitation source by sensor: %s", tables["precip_sources"]["source"].value_counts().to_dict())
 reasons = events["end_reason"].value_counts().to_dict()
 log.info("        %d events at %d sensors; end reasons %s; mean days above theta_fc %.2f",
          len(events), events["sensor_id"].nunique(), reasons, events["n_days_above_fc"].mean())

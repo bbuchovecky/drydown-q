@@ -130,11 +130,30 @@ def test_rain_ends_the_event_with_whole_event_check(smoke_cfg):
 
 def test_precip_source_insitu_then_chirps(smoke_cfg):
     day = _day(CLEAN).assign(sensor_id="s")
-    day["precip_insitu_mm"] = np.nan
+    day["precip_insitu_mm"] = 0.0
     day.loc[3, "precip_insitu_mm"] = 6.0            # the gauge saw rain on day 3; CHIRPS did not
+    day.loc[0, "precip_mm"] = 6.0                   # CHIRPS saw rain on day 0: equal wet-day shares
     constants = pd.DataFrame({"sensor_id": ["s"], "theta_fc_m3m3": [THETA_FC], "dz_m": [DZ]})
     assert len(find_events(day, constants, smoke_cfg.events)["events"]) == 1          # chirps only
     cfg = dataclasses.replace(smoke_cfg.events, precip_source="insitu_then_chirps")
     assert find_events(day, constants, cfg)["events"].empty                             # gauge rain breaks the start
     with pytest.raises(ValueError, match="precip_insitu_mm"):
         find_events(day.drop(columns="precip_insitu_mm"), constants, cfg)
+
+
+def test_gauge_quality_checks(smoke_cfg):
+    from drydown_q.events import choose_precip
+    cfg = dataclasses.replace(smoke_cfg.events, precip_source="insitu_then_chirps")
+    day = pd.concat([_day(CLEAN).assign(sensor_id=sid) for sid in ["OK/s/x", "ICN/s/x", "WET/s/x"]],
+                    ignore_index=True)
+    day["precip_insitu_mm"] = 0.0
+    day.loc[day.date == day.date.iloc[3], "precip_insitu_mm"] = 6.0
+    day.loc[day.date == day.date.iloc[0], "precip_mm"] = 6.0
+    day.loc[day.sensor_id == "WET/s/x", "precip_insitu_mm"] = 6.0      # gauge wet every day: 12x CHIRPS
+    out, sources = choose_precip(day, cfg)
+    src = sources.set_index("sensor_id")
+    assert src.loc["OK/s/x", "source"] == "insitu_then_chirps"
+    assert src.loc["ICN/s/x", "source"] == "chirps" and "excluded" in src.loc["ICN/s/x", "reason"]
+    assert src.loc["WET/s/x", "source"] == "chirps" and "wet-day share" in src.loc["WET/s/x", "reason"]
+    assert out[out.sensor_id == "OK/s/x"].precip_mm.iloc[3] == 6.0
+    assert out[out.sensor_id == "WET/s/x"].precip_mm.iloc[3] == 0.0
