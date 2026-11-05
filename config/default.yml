@@ -18,8 +18,10 @@ prepare:
   require_land_cell: false            # if true, flag stations whose chosen cell has no valid land data
   lai_product: MOD15A2H.061           # MODIS LAI product: MOD15A2H.061 (Terra, Morgan) | MCD15A2H.061
   lai_qc: none                        # LAI QC: none = keep raw values < 248 (fill codes), no QC bits (Morgan)
+  lai_keep_below: 248                 # [-] delivered LAI values >= this are MODIS fill/class codes and dropped (Morgan)
   lai_fill_max_days: null             # [d] max forward-fill of 8-day composites; null = unlimited (Morgan)
   pet_valid_max_mm_day: 100           # [mm d-1] dPET values >= this become NaN; negatives are kept (Morgan)
+  earth_radius_km: 6371.0088          # [km] IUGG mean Earth radius, for station-to-cell distances
 
 soil:
   theta_fc_rule: clapp_hornberger     # theta_fc from C&H (1978) texture class at psi_fc; fallback max_sm when class missing/absent

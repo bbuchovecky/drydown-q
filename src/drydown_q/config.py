@@ -39,9 +39,11 @@ class Prepare:
     max_cell_offset_km: Number | None
     require_land_cell: bool
     lai_product: Literal["MOD15A2H.061", "MCD15A2H.061"]
-    lai_qc: Literal["none", "qc"]
+    lai_qc: Literal["none"]
+    lai_keep_below: Number
     lai_fill_max_days: int | None
     pet_valid_max_mm_day: Number
+    earth_radius_km: Number
 
 
 @dataclass(frozen=True)

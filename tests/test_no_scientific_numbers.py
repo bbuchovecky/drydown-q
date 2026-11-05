@@ -16,6 +16,9 @@ ALLOWED = {
     1000,      # unit conversion: mm per m (Delta z in m, water depths in mm)
     16,        # length of hex hash prefixes
     20,        # 1 << 20 byte read chunk for checksums
+    100,       # unit conversion: percent -> fraction
+    10,        # appeears_pipeline station key: first 10 hex characters of SHA-1
+    180, 360,  # longitude conventions (degrees)
 }
 FILES = sorted([*(REPO / "src").rglob("*.py"), *(REPO / "scripts").glob("*.py")])
 

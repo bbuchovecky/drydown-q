@@ -38,6 +38,21 @@ edit the paths, and run `pixi run prepare` once (slow: reads the raw archives).
 | `test` | `pytest` (synthetic recovery test is marked `recovery`) |
 | `make-smoke-data` | regenerate the committed synthetic dataset (deterministic) |
 
+## Inputs for `prepare`
+
+| Path key | Expected contents |
+| --- | --- |
+| `ismn_archive` | an unpacked ISMN archive (header_values `.stm` files + `*_static_variables.csv`), read with the `ismn` package; its metadata cache goes to `<prepared_dir>/work/ismn_meta` |
+| `chirps_dir` | CHIRPS v2.0 0.05° daily yearly files `chirps-v2.0.<year>.days_p05.nc`, variable `precip` [mm d⁻¹] |
+| `dpet_dir` | dPET 0.1° daily yearly files `<year>_daily_pet.nc`, variable `pet` [mm d⁻¹] |
+| `appeears_dir` | tidy AppEEARS parquet from `appeears_pipeline tidy`: `*__MOD15A2H.061.parquet` (or `MCD15A2H.061`), `*__MCD12Q1.061.parquet`, `*__MOD44B.061.parquet` |
+
+`prepare` writes intermediate files to `<prepared_dir>/work/` (per-sensor daily means,
+per-input-file extractions) and skips any that exist, so an interrupted run resumes.
+Sensors or stations that fail are listed in `<prepared_dir>/failures.csv`.
+`station_day` starts `ai_window_days − 1` days before each sensor's first value, so the
+analysis can recompute the AI window sums exactly.
+
 ## Configuration
 
 - `config/default.yml`: every scientific setting, one section per stage, with a unit
@@ -94,9 +109,9 @@ Units are in the column names. Filters add columns and never drop rows.
 | `theta_m3m3` | float | daily mean volumetric soil moisture [m³ m⁻³] of kept hourly values |
 | `n_valid_hours` | int | hourly values with a kept ISMN flag |
 | `precip_mm`, `pet_mm` | float | CHIRPS precipitation and dPET potential ET [mm d⁻¹] |
-| `precip_60d_mm`, `pet_60d_mm` | float | trailing 60-day sums ending on `date` [mm] |
+| `precip_60d_mm`, `pet_60d_mm` | float | trailing sums over `covariates.ai_window_days` (60) ending on `date`, computed on the full forcing record [mm] |
 | `lai_m2m2` | float | MODIS LAI on `date` (latest composite) [m² m⁻²] |
-| `igbp_class` | str | MODIS MCD12Q1 IGBP class of that year (e.g. `GRA`) |
+| `igbp_class` | str | MODIS MCD12Q1 IGBP class of that year (e.g. `GRA`); empty when unavailable |
 | `tree_cover_pct` | float | MOD44B tree cover of that year [%] |
 
 ### `sensor_constants`: one sensor (analysis step 1, depends on `soil`)
