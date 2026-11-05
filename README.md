@@ -81,6 +81,11 @@ median and coefficient is compared with `data/tables/morgan2025_tier1_targets.cs
 The comparison is written to `outputs/runs/reproduce_tier1/report.md`; the script
 exits non-zero if any check fails.
 
+`python scripts/reproduce.py --check-ismn` compares the ISMN part of `prepare` (sensors,
+daily θ, sensor constants) with Morgan's `metadata.csv` and the θ arrays of the released
+events; it needs only the ISMN archive. Its sensor pairs are written to
+`outputs/runs/check_ismn/sensor_pairs.parquet`.
+
 ## Table schemas
 
 Schemas are asserted at write time ([`schemas.py`](src/drydown_q/schemas.py)).

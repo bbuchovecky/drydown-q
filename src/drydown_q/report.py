@@ -115,22 +115,26 @@ def match_sensors(ours: pd.DataFrame, theirs: pd.DataFrame) -> pd.DataFrame:
     """Pair our sensors with another sensor list (e.g. Morgan's metadata.csv).
 
     Both tables have network, station, sensor, depth_top_m, depth_bottom_m.
-    First by exact (network, station, sensor) name; the rest by (network,
-    station, depth range) when that key is unique on both sides (instrument
-    names change between ISMN archive versions). Returns one row per pair with
-    ``our_sensor_id``, ``their_sensor``, ``match`` in {name, depth}.
+    Stations are compared case-insensitively (ISMN changed the case of station
+    names between archive versions, e.g. AGUACANYON -> AguaCanyon). Sensors are
+    paired first by exact name, then by (network, station, depth range) when
+    that key is unique on both sides (instrument names also change). Returns
+    ``our_sensor_id``, ``network``, ``their_station``, ``their_sensor``, ``match``
+    in {name, depth}. Replicate probes at one depth stay unpaired here.
     """
-    key = ["network", "station", "sensor"]
-    name = ours.merge(theirs[key], on=key)
-    name = name.assign(their_sensor=name["sensor"], match="name")
-    rest_o = ours[~ours["sensor_id"].isin(name["sensor_id"])]
-    rest_t = theirs.merge(name[key], on=key, how="left", indicator=True)
-    rest_t = rest_t[rest_t["_merge"] == "left_only"].drop(columns="_merge")
-    dkey = ["network", "station", "depth_top_m", "depth_bottom_m"]
+    o = ours.assign(station_key=ours["station"].str.lower())
+    t = theirs.assign(station_key=theirs["station"].str.lower()).rename(
+        columns={"station": "their_station", "sensor": "their_sensor"})
+    name = o.merge(t[["network", "station_key", "their_station", "their_sensor"]],
+                   left_on=["network", "station_key", "sensor"],
+                   right_on=["network", "station_key", "their_sensor"]).assign(match="name")
+    rest_o = o[~o["sensor_id"].isin(name["sensor_id"])]
+    taken = name.set_index(["network", "station_key", "their_sensor"]).index
+    rest_t = t[~t.set_index(["network", "station_key", "their_sensor"]).index.isin(taken)]
+    dkey = ["network", "station_key", "depth_top_m", "depth_bottom_m"]
     uniq_o = rest_o[~rest_o.duplicated(dkey, keep=False)]
     uniq_t = rest_t[~rest_t.duplicated(dkey, keep=False)]
-    depth = uniq_o.merge(uniq_t[dkey + ["sensor"]].rename(columns={"sensor": "their_sensor"}), on=dkey)
-    depth = depth.assign(match="depth")
+    depth = uniq_o.merge(uniq_t[dkey + ["their_station", "their_sensor"]], on=dkey).assign(match="depth")
     out = pd.concat([name, depth], ignore_index=True)
-    return out[["sensor_id", "network", "station", "their_sensor", "match"]].rename(
+    return out[["sensor_id", "network", "their_station", "their_sensor", "match"]].rename(
         columns={"sensor_id": "our_sensor_id"})

@@ -74,70 +74,118 @@ if args.check_ismn:
     released = pd.read_csv(data / "ismn_results_star_th0_04may.csv.zip",
                            usecols=["SITE_ID", "Sensor_ID", "event_start", "time", "theta",
                                     "min_sm", "max_sm", "theta_fc"])
-    released = released.merge(meta[["station", "sensor", "network"]], left_on=["SITE_ID", "Sensor_ID"],
-                              right_on=["station", "sensor"], validate="many_to_one")
-    rel_sensors = released[["network", "station", "sensor"]].drop_duplicates()
-    covered = rel_sensors.merge(pairs.rename(columns={"their_sensor": "sensor"}), on=["network", "station", "sensor"])
+    released = released.merge(meta[["station", "sensor", "network", "depth_top_m", "depth_bottom_m"]],
+                              left_on=["SITE_ID", "Sensor_ID"], right_on=["station", "sensor"],
+                              validate="many_to_one")
+
+    # Released event-day theta, one row per (sensor, day).
+    long = []
+    for r in released.itertuples():
+        t = np.array(r.time.strip("[]").split(), dtype=float).astype(int)
+        long.append(pd.DataFrame({"network": r.network, "their_station": r.station, "their_sensor": r.sensor,
+                                  "date": pd.Timestamp(r.event_start) + pd.to_timedelta(t, unit="D"),
+                                  "released": np.array(r.theta.strip("[]").split(), dtype=float)}))
+    long = pd.concat(long, ignore_index=True)
+    daily_cache = {}
+
+    def our_daily(sid):
+        if sid not in daily_cache:
+            daily_cache[sid] = pd.read_parquet(work / "daily" / f"{file_key(sid)}.parquet")
+        return daily_cache[sid]
+
+    def equal_share(sid, rel_days):
+        joined = rel_days.merge(our_daily(sid), on="date", how="left")
+        return np.isclose(joined["theta_m3m3"], joined["released"], rtol=0,
+                          atol=np.finfo(np.float32).eps).mean()
+
+    # Replicate probes at one depth: pair by data, choosing the candidate whose
+    # daily theta equals the released event values on the most days (unique best only).
+    rel_sensors = released[["network", "station", "sensor", "depth_top_m", "depth_bottom_m"]].drop_duplicates()
+    rel_sensors = rel_sensors.rename(columns={"station": "their_station", "sensor": "their_sensor"})
+    paired = rel_sensors.merge(pairs, on=["network", "their_station", "their_sensor"])
+    todo = rel_sensors[~rel_sensors["their_sensor"].isin(paired["their_sensor"])
+                       | ~rel_sensors["their_station"].isin(paired["their_station"])]
+    todo = todo.merge(paired[["network", "their_station", "their_sensor"]], how="left", indicator=True)
+    todo = todo[todo["_merge"] == "left_only"].drop(columns="_merge")
+    used = set(pairs["our_sensor_id"])
+    by_data = []
+    ours_by_depth = {k: g["sensor_id"].tolist() for k, g in ours.groupby(
+        [ours["network"], ours["station"].str.lower(), ours["depth_top_m"], ours["depth_bottom_m"]])}
+    rel_by_sensor = {k: g[["date", "released"]] for k, g in long.groupby(["network", "their_station", "their_sensor"])}
+    for r in todo.itertuples():
+        cands = [sid for sid in ours_by_depth.get((r.network, r.their_station.lower(), r.depth_top_m,
+                                                   r.depth_bottom_m), []) if sid not in used]
+        if not cands:
+            continue
+        rel_days = rel_by_sensor[(r.network, r.their_station, r.their_sensor)]
+        shares = pd.Series({sid: equal_share(sid, rel_days) for sid in cands})
+        best = shares.max()
+        if best > 0 and (shares == best).sum() == 1:
+            by_data.append({"our_sensor_id": shares.idxmax(), "network": r.network,
+                            "their_station": r.their_station, "their_sensor": r.their_sensor, "match": "data"})
+            used.add(shares.idxmax())
+    pairs = pd.concat([pairs, pd.DataFrame(by_data)], ignore_index=True)
+    covered = rel_sensors.merge(pairs, on=["network", "their_station", "their_sensor"])
     rows = [("Morgan soil moisture sensors (metadata.csv)", len(meta)),
             ("our soil moisture sensors", len(ours)),
             ("paired by exact name", int((pairs["match"] == "name").sum())),
             ("paired by unique depth", int((pairs["match"] == "depth").sum())),
+            ("paired by data (replicate probes)", int((pairs["match"] == "data").sum())),
             ("sensors with released events", len(rel_sensors)),
-            ("of those, paired with ours", len(covered))]
+            ("of those, paired with ours", len(covered)),
+            ("released events at paired sensors",
+             int(released.merge(covered, left_on=["network", "station", "sensor"],
+                                right_on=["network", "their_station", "their_sensor"]).shape[0])),
+            ("released events", len(released))]
 
     # Texture: our USDA class and fractions vs Morgan's metadata for paired sensors.
     m = (pairs.merge(ours[["sensor_id", "texture_class", "sand_frac"]], left_on="our_sensor_id", right_on="sensor_id")
-         .merge(meta[["network", "station", "sensor", "sand_fraction", "clay_fraction", "soil_texture"]]
-                .rename(columns={"sensor": "their_sensor"}), on=["network", "station", "their_sensor"]))
+         .merge(meta[["network", "station", "sensor", "sand_fraction", "soil_texture"]]
+                .rename(columns={"station": "their_station", "sensor": "their_sensor"}),
+                on=["network", "their_station", "their_sensor"]))
     their_texture = m["soil_texture"].fillna("unknown").str.lower().replace({"not available": "unknown"})
     rows += [("paired: texture class equal", (m["texture_class"] == their_texture).mean()),
              ("paired: median |sand difference| [fraction]",
               (m["sand_frac"] - m["sand_fraction"] / ismn_percent).abs().median())]
 
-    # Daily theta on released event days.
-    rel = released.merge(covered[["network", "station", "sensor", "our_sensor_id"]],
-                         on=["network", "station", "sensor"])
-    long = []
-    for r in rel.itertuples():
-        t = np.array(r.time.strip("[]").split(), dtype=float).astype(int)
-        long.append(pd.DataFrame({"our_sensor_id": r.our_sensor_id,
-                                  "date": pd.Timestamp(r.event_start) + pd.to_timedelta(t, unit="D"),
-                                  "released": np.array(r.theta.strip("[]").split(), dtype=float)}))
-    if not long:
-        raise SystemExit("no released events at paired sensors:\n" + pd.DataFrame(rows).to_string(index=False))
-    long = pd.concat(long, ignore_index=True)
-    daily = pd.concat([pd.read_parquet(work / "daily" / f"{file_key(sid)}.parquet").assign(our_sensor_id=sid)
-                       for sid in long["our_sensor_id"].unique()
-                       if (work / "daily" / f"{file_key(sid)}.parquet").exists()], ignore_index=True)
-    cmp_days = long.merge(daily, on=["our_sensor_id", "date"], how="left")
+    # Daily theta on released event days of paired sensors.
+    cmp_days = long.merge(covered[["network", "their_station", "their_sensor", "our_sensor_id"]],
+                          on=["network", "their_station", "their_sensor"])
+    daily = pd.concat([our_daily(sid).assign(our_sensor_id=sid) for sid in cmp_days["our_sensor_id"].unique()],
+                      ignore_index=True)
+    cmp_days = cmp_days.merge(daily, on=["our_sensor_id", "date"], how="left")
     diff = (cmp_days["theta_m3m3"] - cmp_days["released"]).abs()
     same = np.isclose(cmp_days["theta_m3m3"], cmp_days["released"], rtol=0, atol=np.finfo(np.float32).eps)
+    by_sensor = cmp_days.assign(same=same).groupby("our_sensor_id")["same"].mean()
     rows += [("released event-days compared", len(cmp_days)),
              ("event-days missing in ours", int(cmp_days["theta_m3m3"].isna().sum())),
              ("event-days equal (float32 precision)", same.mean()),
-             ("median |difference| theta", diff.median()), ("mean |difference| theta", diff.mean())]
-    by_sensor = cmp_days.assign(same=same).groupby("our_sensor_id")["same"].mean()
-    rows += [("sensors with all event-days equal", (by_sensor == 1).mean())]
+             ("median |difference| theta", diff.median()), ("mean |difference| theta", diff.mean()),
+             ("sensors with all event-days equal", (by_sensor == 1).mean())]
 
     # Sensor constants from our daily theta vs the released per-event constants.
     day_tbl = daily.rename(columns={"our_sensor_id": "sensor_id"})
-    sens = ours[ours["sensor_id"].isin(day_tbl["sensor_id"].unique())]
-    consts = sensor_constants(sens, day_tbl, cfg.soil)
-    rel_c = (rel.groupby("our_sensor_id")[["min_sm", "max_sm", "theta_fc"]].first()
+    consts = sensor_constants(ours[ours["sensor_id"].isin(day_tbl["sensor_id"].unique())], day_tbl, cfg.soil)
+    rel_c = (released.merge(covered, left_on=["network", "station", "sensor"],
+                            right_on=["network", "their_station", "their_sensor"])
+             .groupby("our_sensor_id")[["min_sm", "max_sm", "theta_fc"]].first()
              .rename_axis("sensor_id").reset_index())
     cc = consts.merge(rel_c, on="sensor_id")
     for ours_col, theirs_col in [("min_sm_m3m3", "min_sm"), ("max_sm_m3m3", "max_sm"), ("theta_fc_m3m3", "theta_fc")]:
-        d = (cc[ours_col] - cc[theirs_col]).abs()
         rows += [(f"sensor constants: {theirs_col} equal (float32 precision)",
                   np.isclose(cc[ours_col], cc[theirs_col], rtol=0, atol=np.finfo(np.float32).eps).mean()),
-                 (f"sensor constants: median |difference| {theirs_col}", d.median())]
+                 (f"sensor constants: median |difference| {theirs_col}", (cc[ours_col] - cc[theirs_col]).abs().median())]
     summary = pd.DataFrame(rows, columns=["quantity", "value"])
     log.info("ISMN check:\n%s", summary.to_string(index=False))
     cmp_days.to_parquet(run_dir / "event_day_theta.parquet", index=False)
     cc.to_parquet(run_dir / "sensor_constants.parquet", index=False)
     pairs.to_parquet(run_dir / "sensor_pairs.parquet", index=False)
     report = write_report(run_dir / "report.md", "ISMN check: prepare step 1 vs Morgan et al. inputs", [
-        ("Summary", markdown_table(summary, "{:.4g}"))])
+        ("Summary", markdown_table(summary, "{:.4g}")),
+        ("Notes", "Sensors are paired by exact name, else by unique (network, station, depth) with "
+                  "stations compared case-insensitively, else (replicate probes) by the candidate whose "
+                  "daily theta equals the released event values on the most days. Morgan's records end "
+                  "earlier than this archive, so min_sm and max_sm are expected to differ.")])
     log.info("report: %s", report)
     sys.exit(0)
 
