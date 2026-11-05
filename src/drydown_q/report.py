@@ -57,7 +57,9 @@ def markdown_table(df, float_format: str = "{:.3f}") -> str:
     """Render a DataFrame as a GitHub markdown table (no extra dependency)."""
     def cell(v):
         if isinstance(v, float):
-            return "" if v != v else float_format.format(v)
+            if v != v:
+                return ""
+            return str(int(v)) if v.is_integer() else float_format.format(v)
         return str(v)
     header = "| " + " | ".join(map(str, df.columns)) + " |"
     rule = "| " + " | ".join("---" for _ in df.columns) + " |"
