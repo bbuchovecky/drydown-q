@@ -51,3 +51,26 @@ def write_manifest(run_dir: Path, cfg: Config, code: str, inputs: dict[str, str]
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(manifest, indent=2, default=str))
     return path
+
+
+def markdown_table(df, float_format: str = "{:.3f}") -> str:
+    """Render a DataFrame as a GitHub markdown table (no extra dependency)."""
+    def cell(v):
+        if isinstance(v, float):
+            return "" if v != v else float_format.format(v)
+        return str(v)
+    header = "| " + " | ".join(map(str, df.columns)) + " |"
+    rule = "| " + " | ".join("---" for _ in df.columns) + " |"
+    body = ["| " + " | ".join(cell(v) for v in row) + " |" for row in df.itertuples(index=False)]
+    return "\n".join([header, rule, *body])
+
+
+def write_report(path: Path, title: str, sections: list[tuple[str, str]]) -> Path:
+    """Write ``report.md``: a title, then each (heading, markdown body) in order."""
+    lines = [f"# {title}", ""]
+    for heading, body in sections:
+        lines += [f"## {heading}", "", body, ""]
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("\n".join(lines))
+    return path

@@ -121,8 +121,8 @@ class Binning:
     open_bin_upper_for_mid: dict[str, Number]
     lai_min_inclusive_surface: bool
     min_events_per_bin: int
-    statistic: Literal["median", "mean"]
-    bin_weights: Literal["equal", "n_events"]
+    statistic: Literal["median"]
+    bin_weights: Literal["equal"]
     surface_form: Literal["a*ai + b*lai + c*ai*lai + d"]
 
 

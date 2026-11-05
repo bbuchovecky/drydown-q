@@ -76,7 +76,7 @@ SCHEMAS = {
         "required": {"veg_class": "str", "a": "float", "b": "float", "c": "float",
                      "d": "float", "a_se": "float", "b_se": "float", "c_se": "float",
                      "d_se": "float", "r2_bins": "float", "n_bins": "int",
-                     "n_events": "int"},
+                     "n_events": "int", "fit_status": "str"},
         "extra": {},
     },
 }

@@ -1,0 +1,32 @@
+check,veg_class,quantity,expected,tolerance,source
+after_lc_join,,events,217890,0,"recipe: 228,012 rows -> 217,890 after the MCD12Q1 join"
+after_quality_filters,,events,37668,0,"Morgan et al. (2025): after the filters (all classes)"
+after_quality_filters,,stations,1839,0,"Morgan et al. (2025)"
+final_set,,events,26747,0,"HERB/SAV/WOOD, LAI >= 0.5"
+final_set,,stations,1268,0,
+surface_set,,events,25513,0,"LAI > 0.5"
+surface_set,,stations,1249,0,
+median_q,HERB,q,0.851,0.001,final set
+median_q,SAV,q,1.010,0.001,final set
+median_q,WOOD,q,1.077,0.001,final set
+bins_used,HERB,n_bins,39,0,">= 5 events"
+bins_used,SAV,n_bins,39,0,
+bins_used,WOOD,n_bins,40,0,
+events_in_bins,HERB,n_events,10045,0,
+events_in_bins,SAV,n_events,5342,0,
+events_in_bins,WOOD,n_events,9239,0,
+surface,HERB,a,0.651,0.001,
+surface,HERB,b,0.023,0.001,
+surface,HERB,c,-0.128,0.001,
+surface,HERB,d,0.548,0.001,
+surface,HERB,r2_bins,0.77,0.005,reported to 2 dp
+surface,SAV,a,1.857,0.001,
+surface,SAV,b,0.141,0.001,
+surface,SAV,c,-0.362,0.001,
+surface,SAV,d,-0.037,0.001,
+surface,SAV,r2_bins,0.77,0.005,reported to 2 dp
+surface,WOOD,a,0.669,0.001,
+surface,WOOD,b,0.104,0.001,
+surface,WOOD,c,-0.141,0.001,
+surface,WOOD,d,0.616,0.001,
+surface,WOOD,r2_bins,0.53,0.005,reported to 2 dp

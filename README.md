@@ -58,6 +58,14 @@ setting refits nothing. A run's report, resolved config, log and manifest (confi
 code hash, input checksums, stage keys, package versions, wall time) go to
 `outputs/runs/<run>/`.
 
+## Reproduction
+
+`pixi run reproduce` runs tier 1: the released Morgan et al. results table is used
+as the `fits` table, steps 4–9 run on it with the baseline config, and every count,
+median and coefficient is compared with `data/tables/morgan2025_tier1_targets.csv`.
+The comparison is written to `outputs/runs/reproduce_tier1/report.md`; the script
+exits non-zero if any check fails.
+
 ## Table schemas
 
 Schemas are asserted at write time ([`schemas.py`](src/drydown_q/schemas.py)).
@@ -143,7 +151,8 @@ The `fits` columns of the q model, plus `sensor_id`, `station_id`, `ai_60d`,
 
 ### `surfaces`: one class
 
-`veg_class`, `a`, `b`, `c`, `d` and `a_se` … `d_se`, `r2_bins`, `n_bins`, `n_events`.
+`veg_class`, `a`, `b`, `c`, `d` and `a_se` … `d_se`, `r2_bins`, `n_bins`, `n_events`
+(summed over used bins), `fit_status` (`ok`, `too_few_bins` or `failed: <message>`).
 
 ### `summary`: one sweep run
 
