@@ -25,10 +25,13 @@ from drydown_q.binning import bin_medians, fit_surface, surface_set
 from drydown_q.config import TABLES_DIR, load_config, write_resolved
 from drydown_q.covariates import add_derived, assign_class
 from drydown_q.filters import QUALITY_RULES, cascade, flag_filters
+from drydown_q.fitting import fit_event
 from drydown_q.report import markdown_table, write_report
 
 parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
 parser.add_argument("--paths", default=None, help="paths file (default config/paths.yml)")
+parser.add_argument("--refit-sample", type=int, default=0,
+                    help="released events refitted with our fit_event (0 = skip)")
 args = parser.parse_args()
 
 cfg = load_config("morgan2025", args.paths)
@@ -126,6 +129,40 @@ analysis.to_parquet(run_dir / "analysis.parquet", index=False)
 bins.to_parquet(run_dir / "bins.parquet", index=False)
 surfaces.to_parquet(run_dir / "surfaces.parquet", index=False)
 
+# ── Fit check: refit a random sample of released events with our fit_event ────
+# Inputs are the released event arrays and constants (theta, t, theta_fc,
+# min_sm, dz, q_theta_w, and the released scalar `pet` = event PET_max).
+# Reported, not pass/fail: k and theta_star are not separately identifiable.
+refit_rows = []
+if args.refit_sample:
+    sample = released.sample(min(args.refit_sample, len(released)), random_state=0)
+    for r in sample.itertuples():
+        t = np.array(r.time.strip("[]").split(), dtype=float)
+        sensor = {"theta_fc_m3m3": r.theta_fc, "min_sm_m3m3": r.min_sm, "dz_m": r.dz,
+                  "theta_w_m3m3": r.q_theta_w if np.isfinite(r.q_theta_w) else r.min_sm}
+        theta_r = theta.loc[r.Index]
+        for model, pairs in [("q_stage2", [("q", "q_q"), ("k_per_day", "q_k"),
+                                           ("theta_star_m3m3", "q_theta_star"), ("r2", "q_r_squared")]),
+                             ("exponential", [("tau_days", "exp_tau"), ("theta_w_m3m3", "exp_theta_w"),
+                                              ("r2", "exp_r_squared")])]:
+            fit = fit_event(t, theta_r, np.array([r.pet]), sensor, model, cfg.fitting)
+            for ours_col, theirs_col in pairs:
+                refit_rows.append({"model": model, "parameter": ours_col, "ours_ok": fit["fit_status"] == "ok",
+                                   "ours": fit.get(ours_col, np.nan), "released": getattr(r, theirs_col)})
+refit = pd.DataFrame(refit_rows)
+refit_table = pd.DataFrame()
+if not refit.empty:
+    refit["abs_diff"] = (refit["ours"] - refit["released"]).abs()
+    refit["both_ok"] = refit["ours_ok"] & refit["released"].notna()
+    refit_table = refit.groupby(["model", "parameter"], sort=False).agg(
+        events=("ours", "size"),
+        ours_failed=("ours_ok", lambda ok: int((~ok).sum())),
+        released_failed=("released", lambda v: int(v.isna().sum())),
+        median_abs_diff=("abs_diff", "median"), mean_abs_diff=("abs_diff", "mean"),
+        max_abs_diff=("abs_diff", "max")).reset_index()
+    log.info("refit of %d released events (diffs over events where both fitted):\n%s",
+             len(sample), refit_table.to_string(index=False))
+
 # ── Compare with the published numbers ────────────────────────────────────────
 targets = pd.read_csv(TABLES_DIR / "morgan2025_tier1_targets.csv", keep_default_na=False)
 ours = pd.DataFrame(ours, columns=["check", "veg_class", "quantity", "ours"])
@@ -142,6 +179,8 @@ log.info("tier 1 comparison:\n%s", table.to_string(index=False))
 report = write_report(run_dir / "report.md", "Reproduction tier 1: downstream steps on the released fits", [
     ("Comparison with Morgan et al. (2025)", markdown_table(table, "{:.4g}")),
     ("Filter cascade", markdown_table(steps)),
+    (f"Fit check: {args.refit_sample} released events refitted with our fit_event",
+     markdown_table(refit_table, "{:.2e}") if not refit_table.empty else "skipped"),
     ("Surfaces", markdown_table(surfaces)),
 ])
 log.info("report: %s", report)

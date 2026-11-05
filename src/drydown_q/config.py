@@ -81,6 +81,7 @@ class Fitting:
     q_start: Number
     theta_star_bounds: list[str]
     k_upper: Literal["max_daily_pet"]
+    k_start_fraction: Number
     pet_default_mm_day: Number
     exp_theta_w_bounds: list[str]
     exp_tau_bounds: list[Number]

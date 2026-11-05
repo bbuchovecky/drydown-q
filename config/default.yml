@@ -52,7 +52,8 @@ fitting:
   q_bounds: [0, .inf]                 # [-] bounds on q
   q_start: 1.001                      # [-] starting q (avoids the singularity at q = 1)
   theta_star_bounds: [min_sm, theta_fc]   # [m3 m-3] bounds on theta_star, named sensor constants; start = upper
-  k_upper: max_daily_pet              # k in [0, PET_max / (1000 dz)], PET_max = largest daily dPET in event; start = half
+  k_upper: max_daily_pet              # k in [0, PET_max / (1000 dz)], PET_max = largest daily dPET in event
+  k_start_fraction: 0.5               # [-] starting k = this fraction of its upper bound (Morgan: half)
   pet_default_mm_day: 5               # [mm d-1] PET_max used when dPET is missing for the whole event
   exp_theta_w_bounds: [min_sm, event_min]  # [m3 m-3] exponential theta_w bounds, named constants; start = mean
   exp_tau_bounds: [0, .inf]           # [d] exponential tau bounds
