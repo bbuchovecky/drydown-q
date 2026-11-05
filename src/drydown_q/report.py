@@ -7,6 +7,8 @@ import platform
 import time
 from pathlib import Path
 
+import pandas as pd
+
 from drydown_q.config import Config, as_dict
 
 PACKAGES = ["numpy", "pandas", "scipy", "xarray", "netCDF4", "pyarrow", "matplotlib",
@@ -76,3 +78,34 @@ def write_report(path: Path, title: str, sections: list[tuple[str, str]]) -> Pat
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("\n".join(lines))
     return path
+
+
+def compare_events(ours: pd.DataFrame, released: pd.DataFrame,
+                   parameters: dict[str, str]) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Match our events with released ones on (sensor_id, start_date).
+
+    ``ours`` and ``released`` each have ``sensor_id``, ``start_date`` and the
+    parameter columns (``parameters`` maps our column -> released column).
+    Returns ``(summary, matched)``: the summary has the share of released events
+    reproduced, the share of our events that are new, the same shares restricted
+    to sensors present in both, and the median |difference| of each parameter
+    over matched events; ``matched`` is the joined table.
+    """
+    key = ["sensor_id", "start_date"]
+    rel = released[key + list(parameters.values())].rename(columns={v: f"released_{k}" for k, v in parameters.items()})
+    matched = ours[key + list(parameters)].merge(rel, on=key, how="inner")
+    common = set(ours["sensor_id"]) & set(released["sensor_id"])
+    rows = [
+        ("released events", len(released)), ("our events", len(ours)), ("matched events", len(matched)),
+        ("share of released events reproduced", len(matched) / max(len(released), 1)),
+        ("share of our events that are new", 1 - len(matched) / max(len(ours), 1)),
+        ("sensors in both", len(common)),
+        ("share of released sensors present in ours", len(common) / max(released["sensor_id"].nunique(), 1)),
+        ("share reproduced, sensors in both",
+         len(matched) / max(released["sensor_id"].isin(common).sum(), 1)),
+        ("share new, sensors in both", 1 - len(matched) / max(ours["sensor_id"].isin(common).sum(), 1)),
+    ]
+    for ours_col in parameters:
+        diff = (matched[ours_col] - matched[f"released_{ours_col}"]).abs()
+        rows.append((f"median |difference| {ours_col}", diff.median()))
+    return pd.DataFrame(rows, columns=["quantity", "value"]), matched

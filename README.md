@@ -139,11 +139,14 @@ Units are in the column names. Filters add columns and never drop rows.
 
 ### `event_days`: one day in one event
 
+Every day from start to end is a row, including days with missing θ (the fit drops
+them; PET_max covers all event days).
+
 | Column | Type | Meaning |
 | --- | --- | --- |
 | `event_id` | str | |
 | `t_days` | int | days since the start |
-| `theta_m3m3` | float | unmasked daily θ [m³ m⁻³] |
+| `theta_m3m3` | float | unmasked daily θ [m³ m⁻³]; NaN on missing days |
 | `pet_mm` | float | dPET [mm d⁻¹] |
 
 ### `fits`: one event × one model
@@ -152,6 +155,8 @@ Units are in the column names. Filters add columns and never drop rows.
 (e.g. `k_per_day`, `q`, `theta_star_m3m3`, `tau_days`, `theta_w_m3m3`) and its
 standard error `<param>_se`, `r2`, `rmse_m3m3`, `fit_status`, `fit_message`, and a
 bool `at_bound_<param>` per bounded parameter.
+
+### `covariates`: the `analysis` table before the filter flags (step 4)
 
 ### `analysis`: one event with its fit and covariates
 
@@ -168,6 +173,8 @@ The `fits` columns of the q model, plus `sensor_id`, `station_id`, `ai_60d`,
 
 `veg_class`, `a`, `b`, `c`, `d` and `a_se` … `d_se`, `r2_bins`, `n_bins`, `n_events`
 (summed over used bins), `fit_status` (`ok`, `too_few_bins` or `failed: <message>`).
+
+Each run also writes `outputs/runs/<run>/summary.json` with its headline numbers.
 
 ### `summary`: one sweep run
 

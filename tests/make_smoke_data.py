@@ -9,7 +9,7 @@ This is test data, not science: the numbers below only need to produce
 realistic-looking drydowns, gaps, above-field-capacity days and a spread of
 aridity and LAI. Each station has one sensor and one vegetation class.
 
-Soil water model (per day): rain adds P / (1000 dz); water above theta_fc
+Soil water model (per day, sensor at 0.10 m): rain adds P / (1000 dz); water above theta_fc
 drains by a fixed fraction per day; below theta_star the loss follows the
 q model dtheta/dt = -k ((theta - theta_w) / (theta_star - theta_w))^q, applied
 with its analytical one-day solution; above theta_star the loss is k.
@@ -24,10 +24,10 @@ from drydown_q.schemas import assert_schema
 
 OUT = Path(__file__).parent / "data" / "smoke"
 SEED = 20251104
-DATES = pd.date_range("2001-01-01", "2020-12-31", freq="D")
+DATES = pd.date_range("1991-01-01", "2020-12-31", freq="D")
 
 # Shared soil: loam by USDA rules (sand 0.40, silt 0.40, clay 0.20).
-DEPTH_M = 0.05
+DEPTH_M = 0.10
 POROSITY = 0.451
 THETA_FC = 0.31          # matches C&H loam at -33 kPa rounded to 0.01
 DRAIN_FRACTION = 0.6     # share of the water above theta_fc that drains per day
@@ -36,11 +36,11 @@ NOISE_SD = 0.003         # sensor noise, m3 m-3
 STATIONS = [
     # station, igbp, tree cover, lat, lon, k, q, theta_star, theta_w, LAI min/max, wet/dry rain prob
     dict(station="SmokeGrass", igbp="GRA", tree=5.0, lat=36.5, lon=-100.2,
-         k=0.045, q=0.85, theta_star=0.27, theta_w=0.04, lai=(0.3, 2.5), p_rain=(0.20, 0.04)),
+         k=0.022, q=0.85, theta_star=0.27, theta_w=0.04, lai=(0.3, 2.5), p_rain=(0.20, 0.04)),
     dict(station="SmokeSavanna", igbp="SAV", tree=20.0, lat=-15.1, lon=30.4,
-         k=0.040, q=1.0, theta_star=0.26, theta_w=0.05, lai=(0.4, 3.2), p_rain=(0.25, 0.02)),
+         k=0.020, q=1.0, theta_star=0.26, theta_w=0.05, lai=(0.4, 3.2), p_rain=(0.25, 0.02)),
     dict(station="SmokeForest", igbp="ENF", tree=70.0, lat=45.2, lon=-121.8,
-         k=0.035, q=1.1, theta_star=0.25, theta_w=0.06, lai=(1.5, 5.5), p_rain=(0.22, 0.06)),
+         k=0.018, q=1.1, theta_star=0.25, theta_w=0.06, lai=(1.5, 5.5), p_rain=(0.22, 0.06)),
 ]
 RAIN_MEAN_MM = 9.0
 PET_RANGE_MM = (1.5, 6.5)
@@ -70,11 +70,16 @@ def simulate(st, rng, sensor_id):
     season = 0.5 * (1 - np.cos(phase))               # 0 in January, 1 in July (north)
     p_wet, p_dry = st["p_rain"]
     p_rain = p_dry + (p_wet - p_dry) * (0.5 * (1 + np.cos(phase - 0.6)))
-    rain = np.where(rng.random(n) < p_rain, rng.exponential(RAIN_MEAN_MM, n), 0.0)
+    # Wet and dry years, and a yearly greenness anomaly independent of rain, so that
+    # events spread over many AI x LAI bins.
+    years = DATES.year.to_numpy() - DATES.year.min()
+    wetness = rng.uniform(0.3, 1.8, years.max() + 1)[years]
+    greenness = rng.uniform(0, 1, years.max() + 1)[years]
+    rain = np.where(rng.random(n) < p_rain * wetness, rng.exponential(RAIN_MEAN_MM, n), 0.0)
     pet = PET_RANGE_MM[0] + (PET_RANGE_MM[1] - PET_RANGE_MM[0]) * season
     pet = pet + rng.normal(0, 0.4, n)
     lai_lo, lai_hi = st["lai"]
-    lai = lai_lo + (lai_hi - lai_lo) * np.clip(season + rng.normal(0, 0.05, n), 0, 1)
+    lai = lai_lo + (lai_hi - lai_lo) * np.clip(0.5 * season + 0.5 * greenness + rng.normal(0, 0.05, n), 0, 1)
 
     theta = np.empty(n)
     th = THETA_FC
@@ -93,7 +98,7 @@ def simulate(st, rng, sensor_id):
         missing[year_start:year_start + 10] = True
     theta[missing] = np.nan
     hours = np.where(missing, 0, rng.choice([24, 24, 24, 23, 12], n)).astype("int64")
-    pet[rng.random(n) < 0.005] = np.nan               # occasional missing dPET
+    pet[rng.random(n) < 0.0005] = np.nan              # rare missing dPET
 
     day = pd.DataFrame({
         "sensor_id": sensor_id, "date": DATES, "theta_m3m3": theta,

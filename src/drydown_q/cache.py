@@ -44,3 +44,10 @@ def cached_stage(stage: str, compute, cache_dir: Path, section, upstream: str,
         "seconds": round(time.time() - started, 2),
     }, indent=2))
     return tables, key
+
+
+def read_stage(cache_dir: Path, stage: str, key: str) -> dict[str, pd.DataFrame]:
+    """Tables of a completed stage, by the key recorded in a run's manifest."""
+    folder = Path(cache_dir) / stage / key
+    names = json.loads((folder / "_complete.json").read_text())["tables"]
+    return {name: pd.read_parquet(folder / f"{name}.parquet") for name in names}

@@ -75,6 +75,8 @@ def attach_covariates(fits_q: pd.DataFrame, events: pd.DataFrame, event_days: pd
     covs["veg_class"] = assign_class(covs["igbp_class"], cfg.class_scheme)
     sensor_cols = ["sensor_id", "station_id", "network", "lat_deg", "lon_deg",
                    "depth_top_m", "depth_bottom_m"]
+    # The fit's own theta_w (fixed at the sensor value) is the one the filters use.
+    constants = constants[[c for c in constants.columns if c not in fits_q.columns or c == "sensor_id"]]
     out = (fits_q
            .merge(events, on="event_id", how="left", validate="one_to_one")
            .merge(sensors[sensor_cols], on="sensor_id", how="left", validate="many_to_one")

@@ -7,13 +7,18 @@ surfaces) run on it with the baseline config. Every number is compared with
 ``data/tables/morgan2025_tier1_targets.csv``; a mismatch is a bug in our code
 until shown otherwise. Exit status 1 if any check fails.
 
-Tier 2 (full rebuild from raw ISMN data) is added in build phase 5.
+Tier 2 (full rebuild): our events and fits from ``analyze.py --run morgan2025``
+(steps 0-3 from raw ISMN data) are matched with the released events on
+(sensor, start date). Reported: the share of released events reproduced, the
+share of our events that are new, and the median |difference| in q, k and
+theta_star over matched events. Settings are never tuned to force a match.
 
-    pixi run reproduce
-    python scripts/reproduce.py [--paths config/paths.yml]
+    pixi run reproduce                      # tier 1
+    python scripts/reproduce.py --tier 2    # after `pixi run analyze --run morgan2025`
 """
 
 import argparse
+import json
 import logging
 import sys
 from pathlib import Path
@@ -22,28 +27,60 @@ import numpy as np
 import pandas as pd
 
 from drydown_q.binning import bin_medians, fit_surface, surface_set
+from drydown_q.cache import read_stage
 from drydown_q.config import TABLES_DIR, load_config, write_resolved
 from drydown_q.covariates import add_derived, assign_class
 from drydown_q.filters import QUALITY_RULES, cascade, flag_filters
 from drydown_q.fitting import fit_event
-from drydown_q.report import markdown_table, write_report
+from drydown_q.report import compare_events, markdown_table, write_report
 
 parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
 parser.add_argument("--paths", default=None, help="paths file (default config/paths.yml)")
 parser.add_argument("--refit-sample", type=int, default=0,
                     help="released events refitted with our fit_event (0 = skip)")
+parser.add_argument("--tier", type=int, choices=[1, 2], default=1)
+parser.add_argument("--run", default="morgan2025", help="tier 2: the analyze run to compare")
 args = parser.parse_args()
 
-cfg = load_config("morgan2025", args.paths)
-run_dir = Path(cfg.paths.outputs_dir) / "runs" / "reproduce_tier1"
+cfg = load_config(args.run if args.tier == 2 else "morgan2025", args.paths)
+run_dir = Path(cfg.paths.outputs_dir) / "runs" / f"reproduce_tier{args.tier}"
 run_dir.mkdir(parents=True, exist_ok=True)
 logging.basicConfig(level=cfg.runtime.log_level, format="%(asctime)s %(message)s",
                     datefmt="%H:%M:%S", force=True,
                     handlers=[logging.StreamHandler(), logging.FileHandler(run_dir / "reproduce.log", mode="w")])
 log = logging.getLogger("reproduce")
 write_resolved(cfg, run_dir / "config.resolved.yml")
+if cfg.paths.morgan_repo is None:
+    raise SystemExit("paths.morgan_repo is not set: reproduce needs the released Morgan et al. data")
 data = Path(cfg.paths.morgan_repo) / "data"
 ours = []   # (check, veg_class, quantity, value)
+
+# ── Tier 2: our steps 0-3 against the released events ─────────────────────────
+if args.tier == 2:
+    outputs = Path(cfg.paths.outputs_dir)
+    manifest = json.loads((outputs / "runs" / args.run / "manifest.json").read_text())
+    stage_keys = manifest["stage_keys"]
+    events = read_stage(outputs / "cache", "events", stage_keys["events"])["events"]
+    fits = read_stage(outputs / "cache", "fits", stage_keys["fits"])["fits"]
+    q_fits = fits[fits["model"] == "q_stage2"][["event_id", "q", "k_per_day", "theta_star_m3m3"]]
+    our_events = events.merge(q_fits, on="event_id", how="left")
+    rel = pd.read_csv(data / "ismn_results_star_th0_04may.csv.zip",
+                      usecols=["SITE_ID", "Sensor_ID", "event_start", "q_q", "q_k", "q_theta_star"])
+    meta = pd.read_csv(data / "ISMN" / "metadata.csv", usecols=["station", "sensor", "network"])
+    rel = rel.merge(meta, left_on=["SITE_ID", "Sensor_ID"], right_on=["station", "sensor"], validate="many_to_one")
+    rel["sensor_id"] = rel["network"] + "/" + rel["SITE_ID"] + "/" + rel["Sensor_ID"]
+    rel["start_date"] = pd.to_datetime(rel["event_start"])
+    summary, matched = compare_events(our_events, rel, {"q": "q_q", "k_per_day": "q_k",
+                                                        "theta_star_m3m3": "q_theta_star"})
+    log.info("tier 2:\n%s", summary.to_string(index=False))
+    matched.to_parquet(run_dir / "matched_events.parquet", index=False)
+    report = write_report(run_dir / "report.md", f"Reproduction tier 2: run `{args.run}` vs released events", [
+        ("Event and fit agreement", markdown_table(summary, "{:.4g}")),
+        ("Notes", "Matching is on (network/station/sensor, start date). Sensor names come from the "
+                  "ISMN archive, so renamed instruments in a newer archive do not match; the "
+                  "'sensors in both' rows separate that from detection differences.")])
+    log.info("report: %s", report)
+    sys.exit(0)
 
 # ── Released fits and the join recipe of Morgan's utils_read.add_info ─────────
 # 1. Event theta arrays are stored as strings; parse them only to get the event

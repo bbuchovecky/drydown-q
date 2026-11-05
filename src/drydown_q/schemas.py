@@ -60,6 +60,12 @@ SCHEMAS = {
                      "rmse_m3m3": "float", "fit_status": "str", "fit_message": "str"},
         "extra": {"at_bound_*": "bool", "*_se": "float", "*": "float"},
     },
+    # Step 4 output: the analysis table before the filters add their flags.
+    "covariates": {
+        "required": {"event_id": "str", "sensor_id": "str", "station_id": "str",
+                     "ai_60d": "float", "lai_m2m2": "float", "frac_range": "float"},
+        "extra": {"at_bound_*": "bool", "*": "any"},
+    },
     "analysis": {
         "required": {"event_id": "str", "sensor_id": "str", "station_id": "str",
                      "ai_60d": "float", "lai_m2m2": "float", "veg_class": "str",
