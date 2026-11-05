@@ -84,6 +84,7 @@ class Fitting:
     q_bounds: list[Number]
     q_start: Number
     theta_star_bounds: list[str]
+    theta_star_start: Literal["upper", "midpoint"]
     k_upper: Literal["max_daily_pet"]
     k_start_fraction: Number
     pet_default_mm_day: Number
@@ -94,6 +95,7 @@ class Fitting:
 
 @dataclass(frozen=True)
 class Covariates:
+    analysis_model: Literal["q_stage2", "q_piecewise"]
     ai_window_days: int
     ai_window_includes_start: bool
     ai_window_min_valid_days: int
@@ -266,6 +268,8 @@ def load_config(run: str, paths_file: Path | None = None,
         paths["prepared_dir"] = str(Path(paths["outputs_dir"]) / "prepared")
 
     sections = {name: _build(cls, merged.get(name, {}), name) for name, cls in SECTIONS.items()}
+    if sections["covariates"].analysis_model not in sections["fitting"].models:
+        raise ConfigError("covariates.analysis_model must be one of fitting.models")
     return Config(run_name=run, paths=_build(Paths, paths, str(paths_file)), **sections)
 
 

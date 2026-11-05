@@ -104,3 +104,31 @@ def test_fit_all_rows_and_schema(smoke_cfg):
     assert len(fits) == 3 * len(smoke_cfg.fitting.models)
     assert (fits["fit_status"] == "ok").all()
     assert_schema(fits, "fits")
+
+
+def test_piecewise_model_recovers_stage1_and_stage2(smoke_cfg):
+    # theta_0 above theta_star: a linear stage 1 at rate k, then stage 2. Here k and
+    # theta_star are identifiable (unlike in q_stage2), because the kink fixes theta_star.
+    from drydown_q.models import q_piecewise
+    cfg = dataclasses.replace(smoke_cfg.fitting, models=["q_piecewise"], theta_star_start="midpoint")
+    t = np.arange(16, dtype=float)
+    theta = q_piecewise(t, 0.31, 0.05, 0.03, 1.6, 0.22)
+    row = fit_event(t, theta, np.full(t.size, 5.0), SENSOR, "q_piecewise", cfg)
+    assert row["fit_status"] == "ok" and row["r2"] > 0.9999
+    assert row["k_per_day"] == pytest.approx(0.03, rel=1e-3)
+    assert row["theta_star_m3m3"] == pytest.approx(0.22, rel=1e-3)
+    assert row["q"] == pytest.approx(1.6, rel=1e-2)
+    # Started at the upper bound (theta_star = theta_fc > theta_0) it stops in a local minimum.
+    stuck = fit_event(t, theta, np.full(t.size, 5.0), SENSOR, "q_piecewise",
+                      dataclasses.replace(cfg, theta_star_start="upper"))
+    assert stuck["theta_star_m3m3"] > 0.3
+
+
+def test_analysis_model_must_be_fitted():
+    from drydown_q.config import ConfigError, load_config
+    from conftest import SMOKE_PATHS
+    with pytest.raises(ConfigError, match="analysis_model"):
+        load_config("smoke", SMOKE_PATHS, overrides={"covariates": {"analysis_model": "q_piecewise"}})
+    cfg = load_config("smoke", SMOKE_PATHS, overrides={"covariates": {"analysis_model": "q_piecewise"},
+                                                      "fitting": {"models": ["exponential", "q_stage2", "q_piecewise"]}})
+    assert cfg.covariates.analysis_model == "q_piecewise"

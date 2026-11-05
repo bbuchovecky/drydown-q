@@ -31,7 +31,7 @@ SCHEMAS = {
             "precip_60d_mm": "float", "pet_60d_mm": "float", "lai_m2m2": "float",
             "igbp_class": "str", "tree_cover_pct": "float",
         },
-        "extra": {},
+        "extra": {"precip_insitu_mm": "float"},   # ISMN gauge precipitation [mm d-1], where available
     },
     # Step 1 output: per-sensor constants that depend on the `soil` config section.
     "sensor_constants": {

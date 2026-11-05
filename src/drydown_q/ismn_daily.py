@@ -165,3 +165,29 @@ def write_daily_files(archive: Path, meta_path: Path, sensors: pd.DataFrame, mem
         daily.to_parquet(tmp, index=False)
         tmp.rename(out_dir / f"{file_key(s.sensor_id)}.parquet")
     return failures
+
+
+def insitu_precip(ds: ISMN_Interface, flags_kept: list[str]) -> pd.DataFrame:
+    """Daily in situ precipitation per station: ``station_id, date, precip_insitu_mm``.
+
+        P_day = sum(P_h : flag_h in flags_kept)      [mm d-1], UTC days
+
+    A day with no kept record is NaN (not 0). A partly observed day is the sum
+    of its kept records. Each file is summed on its own; files of one station
+    (deployment periods, which do not overlap, or replicate gauges) are then
+    averaged day by day.
+    """
+    daily = []
+    for net, stat, sens in ds.collection.iter_sensors(variable="precipitation"):
+        data = sens.read_data()
+        kept = data[data["precipitation_flag"].astype(str).isin(flags_kept)]["precipitation"].astype(float)
+        if kept.empty:
+            continue
+        sums = kept.groupby(pd.to_datetime(kept.index).floor("D")).sum(min_count=1)
+        daily.append(pd.DataFrame({"station_id": f"{net.name}/{stat.name}", "date": sums.index,
+                                   "precip_insitu_mm": sums.to_numpy(float)}))
+    if not daily:
+        return pd.DataFrame({"station_id": pd.Series(dtype=str), "date": pd.Series(dtype="datetime64[ns]"),
+                             "precip_insitu_mm": pd.Series(dtype=float)})
+    out = pd.concat(daily, ignore_index=True)
+    return out.groupby(["station_id", "date"], as_index=False)["precip_insitu_mm"].mean()

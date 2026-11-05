@@ -20,7 +20,9 @@ Parameters (config section ``fitting``):
       k          in [0, PET_max / (1000 dz)], start k_start_fraction * upper  (k_upper)
                  PET_max = largest daily dPET in the event, pet_default_mm_day if none
       q          in q_bounds, start q_start
-      theta_star in theta_star_bounds (named constants), start = upper bound
+      theta_star in theta_star_bounds (named constants), start = upper bound or the
+                 midpoint (theta_star_start). With q_piecewise, an upper-bound start
+                 (theta_star >= theta_0, no stage 1) is a local minimum; use midpoint.
       A q-model parameter that is not free is fixed at its starting value.
     exponential  free: theta_w in exp_theta_w_bounds (start = their mean), tau in
                  exp_tau_bounds (start exp_tau_start); fixed theta_0 as above.
@@ -71,7 +73,8 @@ def parameter_setup(model: str, theta_obs: np.ndarray, pet_mm: np.ndarray,
     q_lo, q_hi = cfg.q_bounds
     candidates = {"k": (0, k_hi, cfg.k_start_fraction * k_hi),
                   "q": (q_lo, q_hi, cfg.q_start),
-                  "theta_star": (star_lo, star_hi, star_hi)}
+                  "theta_star": (star_lo, star_hi,
+                                 star_hi if cfg.theta_star_start == "upper" else np.mean([star_lo, star_hi]))}
     fixed = {"theta_0": theta_0, "theta_w": sensor["theta_w_m3m3"]}
     fixed.update({n: candidates[n][2] for n in Q_PARAMS if n not in cfg.free_params_q})
     free = {n: candidates[n] for n in Q_PARAMS if n in cfg.free_params_q}

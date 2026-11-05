@@ -33,8 +33,6 @@ from drydown_q.report import file_checksum, markdown_table, write_manifest, writ
 from drydown_q.schemas import assert_schema
 from drydown_q.soil import sensor_constants
 
-ANALYZED_MODEL = "q_stage2"   # filters, bins and surfaces use this model's fits
-
 parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
 parser.add_argument("--run", required=True, help="run name: config/runs/<run>.yml")
 parser.add_argument("--paths", default=None, help="paths file (default config/paths.yml)")
@@ -120,11 +118,12 @@ report.append(("Step 3: fits", "Fit status:\n\n" + markdown_table(status.reset_i
 
 # ── Step 4. Attach covariates and vegetation classes ──────────────────────────
 c = cfg.covariates
-log.info("step 4: AI = sum(P)/sum(PET) over the %d days ending %s the start day (%d valid days needed); "
-         "LAI = %s; class = %s of the IGBP class in the %s", c.ai_window_days,
+log.info("step 4: analysed model %s; AI = sum(P)/sum(PET) over the %d days ending %s the start day (%d valid days needed); "
+         "LAI = %s; class = %s of the IGBP class in the %s", c.analysis_model, c.ai_window_days,
          "on" if c.ai_window_includes_start else "before", c.ai_window_min_valid_days,
          c.lai_statistic, c.class_scheme, c.landcover_year.replace("_", " "))
-fits_q = fits[fits["model"] == ANALYZED_MODEL].drop(columns="model")
+# The analysed model's fits (covariates.analysis_model) are the ones filtered and binned.
+fits_q = fits[fits["model"] == c.analysis_model].drop(columns="model")
 tables, keys["covariates"] = cached_stage(
     "covariates",
     lambda: {"covariates": attach_covariates(fits_q, events, event_days, sensors, constants, station_day, c)},

@@ -123,3 +123,30 @@ def extract_at_stations(files: list[Path], var: str, cells: pd.DataFrame, value_
     out = cells[["station_id", "row", "col"]].merge(values, on=["row", "col"])
     return out[["station_id", "date", value_name]].sort_values(["station_id", "date"],
                                                                 ignore_index=True)
+
+
+FORCING_COLUMNS = {"chirps": ["precip_mm", "precip_60d_mm"], "dpet": ["pet_mm", "pet_60d_mm"]}
+
+
+def mask_by_cell(forcing: pd.DataFrame, cells: pd.DataFrame, max_km: float | None,
+                 require_land: bool) -> tuple[pd.DataFrame, list[dict]]:
+    """Set a source's forcing missing at stations whose cell is farther than
+    ``max_cell_offset_km`` or (``require_land_cell``) not land.
+
+    ``cells`` has station_id, <source>_offset_km, <source>_cell_is_land for
+    source in chirps, dpet. Returns the masked forcing and one record per
+    (station, source) masked. Inactive when max_km is None and not require_land.
+    """
+    forcing = forcing.copy()
+    records = []
+    for source, columns in FORCING_COLUMNS.items():
+        bad = pd.Series(False, index=cells.index)
+        if max_km is not None:
+            bad |= cells[f"{source}_offset_km"] > max_km
+        if require_land:
+            bad |= ~cells[f"{source}_cell_is_land"].astype(bool)
+        stations = cells.loc[bad, "station_id"]
+        forcing.loc[forcing["station_id"].isin(stations), columns] = np.nan
+        records += [{"id": s, "step": f"{source}_cell", "message": "cell too far or not land; forcing set missing"}
+                    for s in stations]
+    return forcing, records

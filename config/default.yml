@@ -42,9 +42,9 @@ events:
   end_min_decline_mm_day: 0.5         # [mm d-1] end threshold (Morgan hard-coded the start value here)
   min_decline_days: 4                 # [d] a start needs this many consecutive candidate days
   precip_max_mm_day: 2                # [mm d-1] a candidate day needs P <= this
-  precip_check: start_window          # where rain is checked: start_window (Morgan) | whole_event
+  precip_check: start_window          # where rain is checked: start_window (Morgan) | whole_event (a rain day also ends an event)
   precip_missing_is_dry: true         # missing precipitation counts as P = 0
-  precip_source: chirps               # chirps (Morgan) | insitu_then_chirps
+  precip_source: chirps               # chirps (Morgan) | insitu_then_chirps (ISMN gauges have no QC rule yet: some networks report accumulations)
   gap_rule: end_event                 # a missing day ends an event
   exclude_snow_frozen: false          # if true, drop days flagged as snow/frozen before detection
 
@@ -54,7 +54,8 @@ fitting:
   theta_0_rule: first_obs             # theta_0 = first observation = min(event max, theta_fc) after masking
   q_bounds: [0, .inf]                 # [-] bounds on q
   q_start: 1.001                      # [-] starting q (avoids the singularity at q = 1)
-  theta_star_bounds: [min_sm, theta_fc]   # [m3 m-3] bounds on theta_star, named sensor constants; start = upper
+  theta_star_bounds: [min_sm, theta_fc]   # [m3 m-3] bounds on theta_star, named sensor constants
+  theta_star_start: upper             # theta_star starting value: upper bound (Morgan: theta_fc) | midpoint of the bounds (use with q_piecewise)
   k_upper: max_daily_pet              # k in [0, PET_max / (1000 dz)], PET_max = largest daily dPET in event
   k_start_fraction: 0.5               # [-] starting k = this fraction of its upper bound (Morgan: half)
   pet_default_mm_day: 5               # [mm d-1] PET_max used when dPET is missing for the whole event
@@ -63,6 +64,7 @@ fitting:
   exp_tau_start: 1                    # [d] exponential tau starting value
 
 covariates:
+  analysis_model: q_stage2            # model whose fits are filtered, binned and fitted with surfaces (must be in fitting.models)
   ai_window_days: 60                  # [d] AI_60 = trailing sum(P) / sum(PET) over this window
   ai_window_includes_start: true      # the window ends on (and includes) the event start day
   ai_window_min_valid_days: 60        # [d] valid days required in the window (60 = all)

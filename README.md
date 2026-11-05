@@ -133,6 +133,7 @@ Units are in the column names. Filters add columns and never drop rows.
 | `lai_m2m2` | float | MODIS LAI on `date` (latest composite) [m² m⁻²] |
 | `igbp_class` | str | MODIS MCD12Q1 IGBP class of that year (e.g. `GRA`); empty when unavailable |
 | `tree_cover_pct` | float | MOD44B tree cover of that year [%] |
+| `precip_insitu_mm` | float | optional: ISMN gauge precipitation, daily sum of kept records, NaN when none [mm d⁻¹] |
 
 ### `sensor_constants`: one sensor (analysis step 1, depends on `soil`)
 
@@ -155,7 +156,7 @@ Units are in the column names. Filters add columns and never drop rows.
 | `duration_days` | int | `end_date − start_date` [d] |
 | `n_obs` | int | non-missing days fitted |
 | `n_days_above_fc` | int | days in the event with raw θ > θ_fc |
-| `end_reason` | str | `decline_below_threshold`, `gap` or `record_end` |
+| `end_reason` | str | `decline_below_threshold`, `gap`, `record_end` or (with `precip_check = whole_event`) `rain` |
 
 ### `event_days`: one day in one event
 

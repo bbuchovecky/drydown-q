@@ -118,3 +118,23 @@ def test_find_events_tables(smoke_cfg):
     from drydown_q.schemas import assert_schema
     assert_schema(ev, "events")
     assert_schema(days, "event_days")
+
+
+def test_rain_ends_the_event_with_whole_event_check(smoke_cfg):
+    rain = np.zeros(len(CLEAN)); rain[6] = 10.0                     # after the start window (days 2-5)
+    cfg = dataclasses.replace(smoke_cfg.events, precip_check="whole_event")
+    ev = _one(CLEAN, cfg, rain)
+    assert (ev.start[0], ev.end[0], ev.end_reason[0]) == (2, 6, "rain")
+    assert _one(CLEAN, smoke_cfg.events, rain).end.tolist() == [7]     # start_window: rain ignored
+
+
+def test_precip_source_insitu_then_chirps(smoke_cfg):
+    day = _day(CLEAN).assign(sensor_id="s")
+    day["precip_insitu_mm"] = np.nan
+    day.loc[3, "precip_insitu_mm"] = 6.0            # the gauge saw rain on day 3; CHIRPS did not
+    constants = pd.DataFrame({"sensor_id": ["s"], "theta_fc_m3m3": [THETA_FC], "dz_m": [DZ]})
+    assert len(find_events(day, constants, smoke_cfg.events)["events"]) == 1          # chirps only
+    cfg = dataclasses.replace(smoke_cfg.events, precip_source="insitu_then_chirps")
+    assert find_events(day, constants, cfg)["events"].empty                             # gauge rain breaks the start
+    with pytest.raises(ValueError, match="precip_insitu_mm"):
+        find_events(day.drop(columns="precip_insitu_mm"), constants, cfg)

@@ -10,12 +10,16 @@ Per sensor, on the daily series theta_t [m3 m-3] (config section ``events``):
                tau_end   = end_min_decline_mm_day   / (1000 dz)   [m3 m-3 d-1]
    with Delta_t = theta_{t+1} - theta_t on the masked series.
 2. Day t is a candidate when Delta_t < -tau_start and P_t <= precip_max_mm_day
-   (missing P counts as dry when ``precip_missing_is_dry``).
+   (missing P counts as dry when ``precip_missing_is_dry``). P is CHIRPS, or with
+   ``precip_source = insitu_then_chirps`` the station gauge where available.
 3. A start is the first day of each run of days whose next ``min_decline_days``
    days (the day itself included) are all candidates. Rain is checked only
    there (``precip_check = start_window``).
 4. The end is the first day e >= start with Delta_e > -tau_end (Morgan's strict
-   comparison). Rain is not checked. If there is none before the record ends,
+   comparison). Rain is not checked (``precip_check = start_window``). With
+   ``precip_check = whole_event`` a day with P_e > precip_max_mm_day also ends
+   the event on day e (``end_reason = rain``; rain on day e acts on the step
+   from e to e+1, as in the start rule). If there is no end before the record ends,
    end = start (duration 0) and ``end_reason = record_end``, as Morgan did.
    ``end_reason = gap`` when theta is missing on the end day (the event ran
    into a gap), otherwise ``decline_below_threshold``.
@@ -68,8 +72,17 @@ def detect_sensor(day: pd.DataFrame, theta_fc: float, dz_m: float, cfg: Events) 
     delta = masked.shift(-1) - masked                                   # Delta_t = theta_{t+1} - theta_t
     tau_start = cfg.start_min_decline_mm_day / (1000 * dz_m)
     tau_end = cfg.end_min_decline_mm_day / (1000 * dz_m)
-    candidate = candidate_days(delta, day["precip_mm"].reset_index(drop=True), tau_start, cfg)
-    ends_here = (delta > -tau_end).to_numpy()
+    precip = day["precip_mm"].reset_index(drop=True)
+    candidate = candidate_days(delta, precip, tau_start, cfg)
+    ends_on_decline = (delta > -tau_end).to_numpy()
+    if cfg.precip_check == "whole_event":
+        wet = precip > cfg.precip_max_mm_day
+        if not cfg.precip_missing_is_dry:
+            wet |= precip.isna()
+        ends_on_rain = wet.to_numpy()
+    else:
+        ends_on_rain = np.zeros(len(day), dtype=bool)
+    ends_here = ends_on_decline | ends_on_rain
     dates = day["date"].reset_index(drop=True)
     rows, last_end = [], -1
     for s in find_starts(candidate, cfg.min_decline_days):
@@ -78,7 +91,12 @@ def detect_sensor(day: pd.DataFrame, theta_fc: float, dz_m: float, cfg: Events) 
         after = np.flatnonzero(ends_here[s:])
         if after.size:
             e = s + after[0]
-            reason = "gap" if np.isnan(theta[e]) else "decline_below_threshold"
+            if np.isnan(theta[e]):
+                reason = "gap"
+            elif ends_on_decline[e]:
+                reason = "decline_below_threshold"
+            else:
+                reason = "rain"
         else:
             e, reason = s, "record_end"
         values = theta[s:e + 1]
@@ -95,9 +113,14 @@ def detect_sensor(day: pd.DataFrame, theta_fc: float, dz_m: float, cfg: Events) 
 def find_events(station_day: pd.DataFrame, constants: pd.DataFrame, cfg: Events
                 ) -> dict[str, pd.DataFrame]:
     """The ``events`` and ``event_days`` tables for all sensors."""
-    if cfg.precip_check != "start_window" or cfg.precip_source != "chirps" or cfg.exclude_snow_frozen:
-        raise ValueError("only precip_check=start_window, precip_source=chirps and "
-                         "exclude_snow_frozen=false are implemented so far")
+    if cfg.exclude_snow_frozen:
+        raise ValueError("events.exclude_snow_frozen = true is not implemented (needs a snow/frozen rule)")
+    # Precipitation for the rain checks: CHIRPS (precip_source = chirps), or the
+    # station's own gauge where it has a value, CHIRPS otherwise (insitu_then_chirps).
+    if cfg.precip_source == "insitu_then_chirps":
+        if "precip_insitu_mm" not in station_day:
+            raise ValueError("events.precip_source = insitu_then_chirps needs station_day.precip_insitu_mm")
+        station_day = station_day.assign(precip_mm=station_day["precip_insitu_mm"].fillna(station_day["precip_mm"]))
     consts = constants.set_index("sensor_id")
     events, days = [], []
     for sensor_id, day in station_day.groupby("sensor_id", sort=True):

@@ -162,6 +162,15 @@ def test_prepare_modis_columns(prepared):
     assert d.loc["2020-03-15", "lai_m2m2"] > 0
 
 
+def test_insitu_precipitation(prepared):
+    day = prepared["day"]
+    d = day[day.sensor_id == "NETA/St1/ProbeX_soil_moisture_0.050000_0.050000"].set_index("date")
+    assert d.loc["2020-03-20", "precip_insitu_mm"] == pytest.approx(7.0)
+    assert d.loc["2020-03-21", "precip_insitu_mm"] == 0.0           # the flagged 50 mm is not kept
+    assert np.isnan(d.loc["2020-02-15", "precip_insitu_mm"])        # before the gauge record: NaN, not 0
+    assert day[day.sensor_id.str.startswith("NETA/St2")].precip_insitu_mm.isna().all()
+
+
 def test_probe_periods_are_joined(prepared):
     day = prepared["day"]
     sid = "NETA/St2/ProbeY_1_soil_moisture_0.200000_0.200000"
@@ -225,3 +234,19 @@ def test_prepare_stops_after_ismn_without_forcing_paths(raw, tmp_path):
     assert "stopping after step 1" in run.stderr
     assert len(list((tmp_path / "prepared" / "work" / "daily_probe").glob("*.parquet"))) == 4
     assert not (tmp_path / "prepared" / "station_day.parquet").exists()
+
+
+def test_mask_by_cell():
+    from drydown_q.gridded import mask_by_cell
+    forcing = pd.DataFrame({"station_id": ["a", "a", "b", "c"], "precip_mm": 1.0, "precip_60d_mm": 60.0,
+                            "pet_mm": 3.0, "pet_60d_mm": 180.0})
+    cells = pd.DataFrame({"station_id": ["a", "b", "c"], "chirps_offset_km": [1.0, 12.0, 2.0],
+                          "chirps_cell_is_land": [True, True, False], "dpet_offset_km": [3.0, 3.0, 3.0],
+                          "dpet_cell_is_land": [True, True, True]})
+    same, none = mask_by_cell(forcing, cells, None, False)
+    assert none == [] and same.precip_mm.notna().all()
+    far, rec = mask_by_cell(forcing, cells, 10, False)
+    assert far[far.station_id == "b"].precip_mm.isna().all()
+    assert far[far.station_id == "b"].pet_mm.notna().all() and [r["id"] for r in rec] == ["b"]
+    land, rec = mask_by_cell(forcing, cells, None, True)
+    assert land[land.station_id == "c"].precip_mm.isna().all() and [r["id"] for r in rec] == ["c"]

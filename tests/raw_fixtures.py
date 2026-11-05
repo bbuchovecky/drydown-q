@@ -52,6 +52,17 @@ def write_ismn(root: Path) -> Path:
         lines = [f"{t:%Y/%m/%d %H:%M} {v:.4f} {f} M" for t, v, f, k in zip(times, values, flags, keep) if k]
         name = f"NETA_NETA_{station}_sm_{depth:.6f}_{depth:.6f}_ProbeX_20200301_20200630.stm"
         (archive / "NETA" / station / name).write_text(header + "\n".join(lines) + "\n")
+    # A rain gauge at St1: 3 + 4 mm on 2020-03-20 (05, 06 UTC), and a 50 mm record
+    # flagged D01 on 2020-03-21 that must be ignored.
+    lat, lon = STATIONS["St1"]
+    t = pd.date_range("2020-03-01", "2020-06-30 23:00", freq="h")
+    rain = {pd.Timestamp("2020-03-20 05:00"): (3.0, "G"), pd.Timestamp("2020-03-20 06:00"): (4.0, "G"),
+            pd.Timestamp("2020-03-21 10:00"): (50.0, "D01")}
+    lines = [f"{x:%Y/%m/%d %H:%M} {rain.get(x, (0.0, 'G'))[0]:.1f} {rain.get(x, (0.0, 'G'))[1]} M" for x in t]
+    header = f"NETA NETA St1 {lat:.5f} {lon:.5f} 500.0 0.0000 0.0000 'Gauge'\n"
+    (archive / "NETA" / "St1" / "NETA_NETA_St1_p_0.000000_0.000000_Gauge_1_1_20200301_20200630.stm").write_text(
+        header + "\n".join(lines) + "\n")
+
     # A probe split over two deployment-period files (recent ISMN naming
     # <model>_<probe>_<period>), consecutive, sharing one timestamp.
     lat, lon = STATIONS["St2"]

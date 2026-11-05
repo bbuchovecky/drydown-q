@@ -98,6 +98,14 @@ sensors["daily_file"] = [daily_dir / f"{ismn_daily.file_key(s)}.parquet" for s i
 sensors = sensors[[f.exists() for f in sensors["daily_file"]]].reset_index(drop=True)
 log.info("   daily means written for %d sensors (%d failed)", len(sensors), len(failures))
 
+# In situ precipitation (used only by events.precip_source = insitu_then_chirps).
+insitu_file = work / "insitu_precip.parquet"
+if not insitu_file.exists():
+    ismn_daily.insitu_precip(ismn_daily.open_archive(archive, meta_path), p.ismn_flags_kept).to_parquet(
+        insitu_file, index=False)
+insitu = pd.read_parquet(insitu_file)
+log.info("   in situ precipitation at %d stations", insitu.station_id.nunique())
+
 # Steps 2-4 need the gridded forcing and MODIS inputs; without them, stop here
 # (the ISMN work above is kept, and a later run resumes from it).
 missing_inputs = [n for n in ("chirps_dir", "dpet_dir", "appeears_dir") if getattr(cfg.paths, n) is None]
@@ -153,18 +161,12 @@ log.info("2. forcing: %d station-days; median offset CHIRPS %.2f km, dPET %.2f k
          len(forcing), cells.chirps_offset_km.median(), cells.dpet_offset_km.median(),
          (~cells.chirps_cell_is_land).sum(), (~cells.dpet_cell_is_land).sum())
 
-# Optional exclusions: forcing from a distant or non-land cell becomes missing.
-for source, columns in [("chirps", ["precip_mm", "precip_60d_mm"]), ("dpet", ["pet_mm", "pet_60d_mm"])]:
-    bad = pd.Series(False, index=cells.index)
-    if p.max_cell_offset_km is not None:
-        bad |= cells[f"{source}_offset_km"] > p.max_cell_offset_km
-    if p.require_land_cell:
-        bad |= ~cells[f"{source}_cell_is_land"]
-    if bad.any():
-        forcing.loc[forcing.station_id.isin(cells.loc[bad, "station_id"]), columns] = np.nan
-        failures += [{"id": s, "step": f"{source}_cell", "message": "cell too far or not land; forcing set missing"}
-                     for s in cells.loc[bad, "station_id"]]
-        log.info("   %s: forcing set missing at %d stations (cell rule)", source, bad.sum())
+# Optional exclusions (max_cell_offset_km, require_land_cell): forcing from a
+# distant or non-land cell becomes missing, and the station is listed in failures.
+forcing, masked = gridded.mask_by_cell(forcing, cells, p.max_cell_offset_km, p.require_land_cell)
+failures += masked
+if masked:
+    log.info("   forcing set missing for %d (station, source) pairs by the cell rule", len(masked))
 
 # ── 3. MODIS LAI, land cover and tree cover ───────────────────────────────────
 modis_file = work / "lai_daily.parquet"
@@ -195,6 +197,7 @@ for station_id, group in sensors.groupby("station_id", sort=True):
     f_st = forcing[forcing.station_id == station_id].drop(columns="station_id")
     lai_st = lai[lai.station_id == station_id].drop(columns="station_id")
     lc_st = landcover[landcover.station_id == station_id].drop(columns="station_id")
+    p_st = insitu[insitu.station_id == station_id].drop(columns="station_id")
     for s in group.itertuples():
         d = pd.read_parquet(s.daily_file)
         if d.empty:
@@ -203,15 +206,16 @@ for station_id, group in sensors.groupby("station_id", sort=True):
         d = d.set_index("date").reindex(pad).rename_axis("date").reset_index()
         d["n_valid_hours"] = d["n_valid_hours"].fillna(0).astype("int64")
         d = (d.merge(f_st, on="date", how="left").merge(lai_st, on="date", how="left")
+             .merge(p_st, on="date", how="left")
              .assign(year=lambda x: x.date.dt.year).merge(lc_st, on="year", how="left"))
         d["sensor_id"] = s.sensor_id
         d["igbp_class"] = d["igbp_class"].astype(str).where(d["igbp_class"].notna(), "")
         for c in ["theta_m3m3", "precip_mm", "pet_mm", "precip_60d_mm", "pet_60d_mm",
-                  "lai_m2m2", "tree_cover_pct"]:
+                  "lai_m2m2", "tree_cover_pct", "precip_insitu_mm"]:
             d[c] = d[c].astype(float)
         d["sensor_id"] = d["sensor_id"].astype(str)
         d["date"] = d["date"].astype("datetime64[ns]")
-        d = d[day_columns]
+        d = d[day_columns + ["precip_insitu_mm"]]
         assert_schema(d, "station_day")
         table = pa.Table.from_pandas(d, preserve_index=False)
         if writer is None:
