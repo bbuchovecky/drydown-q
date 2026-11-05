@@ -32,18 +32,22 @@ from drydown_q.config import TABLES_DIR, load_config, write_resolved
 from drydown_q.covariates import add_derived, assign_class
 from drydown_q.filters import QUALITY_RULES, cascade, flag_filters
 from drydown_q.fitting import fit_event
-from drydown_q.report import compare_events, markdown_table, write_report
+from drydown_q.ismn_daily import PERCENT as ismn_percent, file_key
+from drydown_q.report import compare_events, markdown_table, match_sensors, write_report
+from drydown_q.soil import sensor_constants
 
 parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
 parser.add_argument("--paths", default=None, help="paths file (default config/paths.yml)")
 parser.add_argument("--refit-sample", type=int, default=0,
                     help="released events refitted with our fit_event (0 = skip)")
 parser.add_argument("--tier", type=int, choices=[1, 2], default=1)
+parser.add_argument("--check-ismn", action="store_true",
+                    help="compare prepare step 1 (sensors, daily theta) with Morgan's metadata and events")
 parser.add_argument("--run", default="morgan2025", help="tier 2: the analyze run to compare")
 args = parser.parse_args()
 
 cfg = load_config(args.run if args.tier == 2 else "morgan2025", args.paths)
-run_dir = Path(cfg.paths.outputs_dir) / "runs" / f"reproduce_tier{args.tier}"
+run_dir = Path(cfg.paths.outputs_dir) / "runs" / ("check_ismn" if args.check_ismn else f"reproduce_tier{args.tier}")
 run_dir.mkdir(parents=True, exist_ok=True)
 logging.basicConfig(level=cfg.runtime.log_level, format="%(asctime)s %(message)s",
                     datefmt="%H:%M:%S", force=True,
@@ -54,6 +58,88 @@ if cfg.paths.morgan_repo is None:
     raise SystemExit("paths.morgan_repo is not set: reproduce needs the released Morgan et al. data")
 data = Path(cfg.paths.morgan_repo) / "data"
 ours = []   # (check, veg_class, quantity, value)
+
+# ── ISMN check: prepare step 1 against Morgan's sensors and event theta ──────
+# Needs only the ISMN part of prepare.py. Sensors are paired by exact name, else
+# by unique (network, station, depth) because instrument names change between
+# archive versions. Daily theta is compared on every day of every released
+# event of a paired sensor (the released `theta` arrays are unmasked daily means).
+if args.check_ismn:
+    work = Path(cfg.paths.prepared_dir) / "work"
+    ours = pd.read_parquet(work / "ismn_sensors.parquet")
+    meta = pd.read_csv(data / "ISMN" / "metadata.csv")
+    meta = meta[meta["variable"] == "soil_moisture"].rename(
+        columns={"depth_from": "depth_top_m", "depth_to": "depth_bottom_m"})
+    pairs = match_sensors(ours, meta[["network", "station", "sensor", "depth_top_m", "depth_bottom_m"]])
+    released = pd.read_csv(data / "ismn_results_star_th0_04may.csv.zip",
+                           usecols=["SITE_ID", "Sensor_ID", "event_start", "time", "theta",
+                                    "min_sm", "max_sm", "theta_fc"])
+    released = released.merge(meta[["station", "sensor", "network"]], left_on=["SITE_ID", "Sensor_ID"],
+                              right_on=["station", "sensor"], validate="many_to_one")
+    rel_sensors = released[["network", "station", "sensor"]].drop_duplicates()
+    covered = rel_sensors.merge(pairs.rename(columns={"their_sensor": "sensor"}), on=["network", "station", "sensor"])
+    rows = [("Morgan soil moisture sensors (metadata.csv)", len(meta)),
+            ("our soil moisture sensors", len(ours)),
+            ("paired by exact name", int((pairs["match"] == "name").sum())),
+            ("paired by unique depth", int((pairs["match"] == "depth").sum())),
+            ("sensors with released events", len(rel_sensors)),
+            ("of those, paired with ours", len(covered))]
+
+    # Texture: our USDA class and fractions vs Morgan's metadata for paired sensors.
+    m = (pairs.merge(ours[["sensor_id", "texture_class", "sand_frac"]], left_on="our_sensor_id", right_on="sensor_id")
+         .merge(meta[["network", "station", "sensor", "sand_fraction", "clay_fraction", "soil_texture"]]
+                .rename(columns={"sensor": "their_sensor"}), on=["network", "station", "their_sensor"]))
+    their_texture = m["soil_texture"].fillna("unknown").str.lower().replace({"not available": "unknown"})
+    rows += [("paired: texture class equal", (m["texture_class"] == their_texture).mean()),
+             ("paired: median |sand difference| [fraction]",
+              (m["sand_frac"] - m["sand_fraction"] / ismn_percent).abs().median())]
+
+    # Daily theta on released event days.
+    rel = released.merge(covered[["network", "station", "sensor", "our_sensor_id"]],
+                         on=["network", "station", "sensor"])
+    long = []
+    for r in rel.itertuples():
+        t = np.array(r.time.strip("[]").split(), dtype=float).astype(int)
+        long.append(pd.DataFrame({"our_sensor_id": r.our_sensor_id,
+                                  "date": pd.Timestamp(r.event_start) + pd.to_timedelta(t, unit="D"),
+                                  "released": np.array(r.theta.strip("[]").split(), dtype=float)}))
+    if not long:
+        raise SystemExit("no released events at paired sensors:\n" + pd.DataFrame(rows).to_string(index=False))
+    long = pd.concat(long, ignore_index=True)
+    daily = pd.concat([pd.read_parquet(work / "daily" / f"{file_key(sid)}.parquet").assign(our_sensor_id=sid)
+                       for sid in long["our_sensor_id"].unique()
+                       if (work / "daily" / f"{file_key(sid)}.parquet").exists()], ignore_index=True)
+    cmp_days = long.merge(daily, on=["our_sensor_id", "date"], how="left")
+    diff = (cmp_days["theta_m3m3"] - cmp_days["released"]).abs()
+    same = np.isclose(cmp_days["theta_m3m3"], cmp_days["released"], rtol=0, atol=np.finfo(np.float32).eps)
+    rows += [("released event-days compared", len(cmp_days)),
+             ("event-days missing in ours", int(cmp_days["theta_m3m3"].isna().sum())),
+             ("event-days equal (float32 precision)", same.mean()),
+             ("median |difference| theta", diff.median()), ("mean |difference| theta", diff.mean())]
+    by_sensor = cmp_days.assign(same=same).groupby("our_sensor_id")["same"].mean()
+    rows += [("sensors with all event-days equal", (by_sensor == 1).mean())]
+
+    # Sensor constants from our daily theta vs the released per-event constants.
+    day_tbl = daily.rename(columns={"our_sensor_id": "sensor_id"})
+    sens = ours[ours["sensor_id"].isin(day_tbl["sensor_id"].unique())]
+    consts = sensor_constants(sens, day_tbl, cfg.soil)
+    rel_c = (rel.groupby("our_sensor_id")[["min_sm", "max_sm", "theta_fc"]].first()
+             .rename_axis("sensor_id").reset_index())
+    cc = consts.merge(rel_c, on="sensor_id")
+    for ours_col, theirs_col in [("min_sm_m3m3", "min_sm"), ("max_sm_m3m3", "max_sm"), ("theta_fc_m3m3", "theta_fc")]:
+        d = (cc[ours_col] - cc[theirs_col]).abs()
+        rows += [(f"sensor constants: {theirs_col} equal (float32 precision)",
+                  np.isclose(cc[ours_col], cc[theirs_col], rtol=0, atol=np.finfo(np.float32).eps).mean()),
+                 (f"sensor constants: median |difference| {theirs_col}", d.median())]
+    summary = pd.DataFrame(rows, columns=["quantity", "value"])
+    log.info("ISMN check:\n%s", summary.to_string(index=False))
+    cmp_days.to_parquet(run_dir / "event_day_theta.parquet", index=False)
+    cc.to_parquet(run_dir / "sensor_constants.parquet", index=False)
+    pairs.to_parquet(run_dir / "sensor_pairs.parquet", index=False)
+    report = write_report(run_dir / "report.md", "ISMN check: prepare step 1 vs Morgan et al. inputs", [
+        ("Summary", markdown_table(summary, "{:.4g}"))])
+    log.info("report: %s", report)
+    sys.exit(0)
 
 # ── Tier 2: our steps 0-3 against the released events ─────────────────────────
 if args.tier == 2:

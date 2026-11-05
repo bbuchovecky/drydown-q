@@ -74,9 +74,8 @@ write_resolved(cfg, prepared / "config.resolved.yml")
 failures = []
 
 # ── 1. ISMN: sensors and UTC daily means ──────────────────────────────────────
-for name in ("ismn_archive", "chirps_dir", "dpet_dir", "appeears_dir"):
-    if getattr(cfg.paths, name) is None:
-        raise SystemExit(f"paths.{name} is not set in the paths file")
+if cfg.paths.ismn_archive is None:
+    raise SystemExit("paths.ismn_archive is not set in the paths file")
 archive, meta_path = Path(cfg.paths.ismn_archive), work / "ismn_meta"
 sensors_file = work / "ismn_sensors.parquet"
 if not sensors_file.exists():
@@ -95,6 +94,14 @@ failures += [f for batch in results for f in batch]
 sensors["daily_file"] = [daily_dir / f"{ismn_daily.file_key(s)}.parquet" for s in sensors.sensor_id]
 sensors = sensors[[f.exists() for f in sensors["daily_file"]]].reset_index(drop=True)
 log.info("   daily means written for %d sensors (%d failed)", len(sensors), len(failures))
+
+# Steps 2-4 need the gridded forcing and MODIS inputs; without them, stop here
+# (the ISMN work above is kept, and a later run resumes from it).
+missing_inputs = [n for n in ("chirps_dir", "dpet_dir", "appeears_dir") if getattr(cfg.paths, n) is None]
+if missing_inputs:
+    pd.DataFrame(failures, columns=["id", "step", "message"]).to_csv(prepared / "failures.csv", index=False)
+    log.info("stopping after step 1: paths %s not set", ", ".join(missing_inputs))
+    raise SystemExit(0)
 
 # Date span of each station's daily records (forcing is kept from window start).
 spans = []

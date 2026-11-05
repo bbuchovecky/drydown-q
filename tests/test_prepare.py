@@ -180,3 +180,16 @@ def test_covariates_recompute_the_stored_window_sums(prepared, smoke_cfg):
         d.loc["2020-03-01", "precip_60d_mm"] / d.loc["2020-03-01", "pet_60d_mm"])
     # e2's window contains the invalid dPET day (2020-05-05): not all 60 days valid -> NaN
     assert np.isnan(cov.loc["e2", "ai_60d"]) and np.isnan(d.loc["2020-05-20", "pet_60d_mm"])
+
+
+def test_prepare_stops_after_ismn_without_forcing_paths(raw, tmp_path):
+    paths = dict(raw, chirps_dir=None, dpet_dir=None, appeears_dir=None,
+                 prepared_dir=str(tmp_path / "prepared"))
+    file = tmp_path / "paths.yml"
+    file.write_text(yaml.safe_dump(paths))
+    run = subprocess.run([sys.executable, str(REPO / "scripts" / "prepare.py"), "--paths", str(file)],
+                         capture_output=True, text=True, cwd=REPO)
+    assert run.returncode == 0, run.stderr[-2000:]
+    assert "stopping after step 1" in run.stderr
+    assert len(list((tmp_path / "prepared" / "work" / "daily").glob("*.parquet"))) == 3
+    assert not (tmp_path / "prepared" / "station_day.parquet").exists()

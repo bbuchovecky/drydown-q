@@ -109,3 +109,28 @@ def compare_events(ours: pd.DataFrame, released: pd.DataFrame,
         diff = (matched[ours_col] - matched[f"released_{ours_col}"]).abs()
         rows.append((f"median |difference| {ours_col}", diff.median()))
     return pd.DataFrame(rows, columns=["quantity", "value"]), matched
+
+
+def match_sensors(ours: pd.DataFrame, theirs: pd.DataFrame) -> pd.DataFrame:
+    """Pair our sensors with another sensor list (e.g. Morgan's metadata.csv).
+
+    Both tables have network, station, sensor, depth_top_m, depth_bottom_m.
+    First by exact (network, station, sensor) name; the rest by (network,
+    station, depth range) when that key is unique on both sides (instrument
+    names change between ISMN archive versions). Returns one row per pair with
+    ``our_sensor_id``, ``their_sensor``, ``match`` in {name, depth}.
+    """
+    key = ["network", "station", "sensor"]
+    name = ours.merge(theirs[key], on=key)
+    name = name.assign(their_sensor=name["sensor"], match="name")
+    rest_o = ours[~ours["sensor_id"].isin(name["sensor_id"])]
+    rest_t = theirs.merge(name[key], on=key, how="left", indicator=True)
+    rest_t = rest_t[rest_t["_merge"] == "left_only"].drop(columns="_merge")
+    dkey = ["network", "station", "depth_top_m", "depth_bottom_m"]
+    uniq_o = rest_o[~rest_o.duplicated(dkey, keep=False)]
+    uniq_t = rest_t[~rest_t.duplicated(dkey, keep=False)]
+    depth = uniq_o.merge(uniq_t[dkey + ["sensor"]].rename(columns={"sensor": "their_sensor"}), on=dkey)
+    depth = depth.assign(match="depth")
+    out = pd.concat([name, depth], ignore_index=True)
+    return out[["sensor_id", "network", "station", "their_sensor", "match"]].rename(
+        columns={"sensor_id": "our_sensor_id"})
