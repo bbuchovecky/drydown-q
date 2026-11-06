@@ -4,6 +4,11 @@ A readable reimplementation of the soil moisture drydown analysis of
 Morgan et al. (2025), *Nature Ecology & Evolution*,
 [doi:10.1038/s41559-025-02810-8](https://doi.org/10.1038/s41559-025-02810-8).
 
+It is built from Morgan et al.'s own code:
+[`ecohydro/drydowns`](https://github.com/ecohydro/drydowns) (drydown detection and
+model fitting) and [`ecohydro/ismn-drydowns`](https://github.com/ecohydro/ismn-drydowns)
+(the ISMN analysis, released results and figures).
+
 The pipeline:
 
 1. Detect drydowns in ISMN in situ soil moisture.
