@@ -214,3 +214,21 @@ Each run also writes `outputs/runs/<run>/summary.json` with its headline numbers
 `stations_final`, `events_surface`, and per class `median_q_<class>`, `a_<class>` …
 `d_<class>`, `r2_bins_<class>`, `n_bins_<class>`, `dq_dai_at_median_lai_<class>`,
 `dq_dai_sign_<class>`; plus `herb_minus_wood_q`.
+
+## AI use
+
+Most of the code, tests and documentation in this repository were written with
+Claude Code (Opus 5.5), directed by the author. Every commit after the initial
+one has a `Co-Authored-By: Claude` line, so `git log` shows which changes had AI help.
+
+The rules the model worked under are in [`AGENTS.md`](AGENTS.md). Under those rules
+the scientific method and every default setting come from Morgan et al. (2025) and
+their code. The model must ask rather than invent a scientific value, and every
+setting must be in `config/default.yml` where it can be read.
+
+The code is checked in two ways. `pixi run reproduce` compares it with Morgan et
+al.'s released results, and the tier 1 coefficients must match within 0.001. The
+recovery tests fit synthetic data with known parameters and check that the fits
+find those parameters again. The author reviewed much of the code before committing
+it, but this was mostly a test of Claude Code's ability to reproduce and reimplement
+a known analysis workflow.
