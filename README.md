@@ -2,7 +2,7 @@
 
 A readable reimplementation of the soil moisture drydown analysis of
 Morgan et al. (2025), *Nature Ecology & Evolution*,
-[doi:10.1038/s41559-025-02810-8](https://doi.org/10.1038/s41559-025-02810-8).
+[doi:10.1038/s41559-025-02810-8](https://doi.org/10.1038/s41559-025-02810-8) using Claude Code (Opus 5.5).
 
 It is built from Morgan et al.'s own code:
 [`ecohydro/drydowns`](https://github.com/ecohydro/drydowns) (drydown detection and
