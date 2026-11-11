@@ -12,7 +12,7 @@ import yaml
 
 import raw_fixtures as fx
 from conftest import REPO
-from drydown_q.gridded import haversine_km, locate_cells
+from drydown_q.gridded import haversine_km, locate_cells, read_grid
 from drydown_q.ismn_daily import daily_means
 from drydown_q.modis import daily_lai, landcover_by_year
 
@@ -73,20 +73,20 @@ STATIONS = pd.DataFrame({"station_id": ["NETA/St1", "NETA/St2"],
 
 def test_nearest_cell_records_offset_and_land(raw):
     first = sorted(__import__("pathlib").Path(raw["chirps_dir"]).glob("*.nc"))[0]
-    cells = locate_cells(first, "precip", STATIONS, "nearest", None, 6371.0088).set_index("station_id")
+    cells = locate_cells(*read_grid(first, "precip"), STATIONS, "nearest", None, 6371.0088).set_index("station_id")
     assert cells.loc["NETA/St1", "cell_is_land"] and not cells.loc["NETA/St2", "cell_is_land"]
     assert 0 < cells.loc["NETA/St1", "offset_km"] < 4
 
 
 def test_nearest_land_within_km(raw, smoke_cfg):
     first = sorted(__import__("pathlib").Path(raw["chirps_dir"]).glob("*.nc"))[0]
-    near = locate_cells(first, "precip", STATIONS, "nearest_land_within_km", 10, 6371.0088).set_index("station_id")
+    near = locate_cells(*read_grid(first, "precip"), STATIONS, "nearest_land_within_km", 10, 6371.0088).set_index("station_id")
     assert near.loc["NETA/St2", "cell_is_land"]
     assert near.loc["NETA/St2", "offset_km"] <= 10
-    tight = locate_cells(first, "precip", STATIONS, "nearest_land_within_km", 1, 6371.0088).set_index("station_id")
+    tight = locate_cells(*read_grid(first, "precip"), STATIONS, "nearest_land_within_km", 1, 6371.0088).set_index("station_id")
     assert not tight.loc["NETA/St2", "cell_is_land"]     # no land cell within 1 km: nearest kept, flagged
     with pytest.raises(ValueError):
-        locate_cells(first, "precip", STATIONS, "nearest_land_within_km", None, 6371.0088)
+        locate_cells(*read_grid(first, "precip"), STATIONS, "nearest_land_within_km", None, 6371.0088)
 
 
 # ── MODIS ─────────────────────────────────────────────────────────────────────
@@ -244,6 +244,22 @@ def test_prepare_stops_after_ismn_without_forcing_paths(raw, tmp_path):
     assert "stopping after step 1" in run.stderr
     assert len(list((tmp_path / "prepared" / "work").glob("daily_probe_*/*.parquet"))) == 4
     assert not (tmp_path / "prepared" / "station_day.parquet").exists()
+
+
+def test_extract_cells_reads_chunk_blocks_like_single_cells(tmp_path):
+    from drydown_q.gridded import extract_cells
+    days = pd.date_range("2020-01-01", periods=30)
+    values = np.arange(30 * 12 * 20, dtype="float32").reshape(30, 12, 20)
+    path = tmp_path / "chunked.nc"
+    __import__("xarray").Dataset({"precip": (("time", "latitude", "longitude"), values)},
+                                 coords={"time": days, "latitude": np.arange(12.0), "longitude": np.arange(20.0)}
+                                 ).to_netcdf(path, encoding={"precip": {"chunksizes": (10, 5, 7), "zlib": True}})
+    cells = pd.DataFrame({"station_id": list("abcde"), "row": [0, 4, 4, 11, 6], "col": [0, 6, 6, 19, 13]})
+    out = extract_cells(path, "precip", cells, "precip_mm")
+    assert len(out) == 4 * 30                                  # the shared cell (4, 6) is read once
+    for r, c in [(0, 0), (4, 6), (11, 19), (6, 13)]:
+        got = out[(out.row == r) & (out.col == c)].sort_values("date")["precip_mm"].to_numpy()
+        assert got == pytest.approx(values[:, r, c])
 
 
 def test_mask_by_cell():

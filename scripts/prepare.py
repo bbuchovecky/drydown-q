@@ -134,8 +134,8 @@ if not forcing_file.exists():
         files = sorted(Path(folder).glob(glob))
         if not files:
             raise SystemExit(f"no {glob} files in {folder}")
-        loc = gridded.locate_cells(files[0], var, stations, p.grid_cell_rule, p.max_cell_offset_km,
-                                   p.earth_radius_km)
+        loc = gridded.locate_cells(*gridded.read_grid(files[0], var), stations, p.grid_cell_rule,
+                                   p.max_cell_offset_km, p.earth_radius_km)
         values = gridded.extract_at_stations(files, var, loc, column,
                                              work / f"{source}_{config_hash(loc[['row', 'col']].to_dict('list'))}")
         cells.append(loc[["station_id", "offset_km", "cell_is_land"]].add_prefix(f"{source}_")

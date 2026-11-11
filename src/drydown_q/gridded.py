@@ -10,7 +10,7 @@ Cell choice (``prepare.grid_cell_rule``):
 
 Every station gets ``offset_km`` (great-circle distance from the station to the
 centre of the cell used) and ``cell_is_land`` (that cell has a finite value on
-the file's first day), whatever the rule.
+the first day of the first file), whatever the rule.
 
 Extraction reads one file at a time and writes one parquet per input file to
 ``out_dir``, so an interrupted run resumes where it stopped.
@@ -53,19 +53,25 @@ def _coord_names(ds: xr.Dataset) -> tuple[str, str]:
     return lat, lon
 
 
-def locate_cells(first_file: Path, var: str, stations: pd.DataFrame, rule: str,
-                 max_km: float | None, earth_radius_km: float) -> pd.DataFrame:
-    """Per station: grid ``row``, ``col``, ``offset_km``, ``cell_is_land``.
-
-    ``stations`` has station_id, lat_deg, lon_deg. The land mask is "finite
-    value on the first day of ``first_file``".
-    """
-    if rule == "nearest_land_within_km" and max_km is None:
-        raise ValueError("grid_cell_rule = nearest_land_within_km needs prepare.max_cell_offset_km")
+def read_grid(first_file: Path, var: str) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Cell-centre latitudes and longitudes [deg] of a gridded file, and its land
+    mask: ``land[row, col]`` = finite ``var`` on the file's first day."""
     with xr.open_dataset(first_file) as ds:
         lat_name, lon_name = _coord_names(ds)
         lats, lons = ds[lat_name].to_numpy(), ds[lon_name].to_numpy()
         land = np.isfinite(ds[var].isel({"time": 0}).transpose(lat_name, lon_name).to_numpy())
+    return lats, lons, land
+
+
+def locate_cells(lats: np.ndarray, lons: np.ndarray, land: np.ndarray, stations: pd.DataFrame,
+                 rule: str, max_km: float | None, earth_radius_km: float) -> pd.DataFrame:
+    """Per station: grid ``row``, ``col``, ``offset_km``, ``cell_is_land``.
+
+    ``lats``, ``lons``, ``land`` come from ``read_grid``;
+    ``stations`` has station_id, lat_deg, lon_deg.
+    """
+    if rule == "nearest_land_within_km" and max_km is None:
+        raise ValueError("grid_cell_rule = nearest_land_within_km needs prepare.max_cell_offset_km")
     # Express station longitudes in the grid's convention (-180..180 or 0..360).
     st_lon = stations["lon_deg"].to_numpy(float)
     if lons.max() > 180:
@@ -94,6 +100,39 @@ def locate_cells(first_file: Path, var: str, stations: pd.DataFrame, rule: str,
     })
 
 
+def extract_cells(path: Path, var: str, cells: pd.DataFrame, value_name: str) -> pd.DataFrame:
+    """Daily values of ``var`` at the grid cells ``cells`` (columns row, col) of one file.
+
+    Returns long ``row, col, date, <value_name>``. Cells are read in blocks that
+    follow the file's storage chunks (when it has them), so each compressed
+    chunk is decoded once rather than once per cell.
+    """
+    unique = cells[["row", "col"]].drop_duplicates()
+    with xr.open_dataset(path) as ds:
+        lat_name, lon_name = _coord_names(ds)
+        da = ds[var].transpose("time", lat_name, lon_name)
+        dates = pd.to_datetime(da["time"].to_numpy()).normalize()
+        chunks = ds[var].encoding.get("chunksizes")
+        block_rows, block_cols = (chunks[1], chunks[2]) if chunks else (1, 1)
+        blocks = unique.groupby([unique["row"] // block_rows, unique["col"] // block_cols])
+        pieces = []
+        for _, block in blocks:
+            r0, c0 = block["row"].min(), block["col"].min()
+            values = da[:, r0:block["row"].max() + 1, c0:block["col"].max() + 1].to_numpy()
+            pieces += [pd.DataFrame({"row": r, "col": c, "date": dates,
+                                     value_name: values[:, r - r0, c - c0].astype(float)})
+                       for r, c in block.itertuples(index=False)]
+    return pd.concat(pieces, ignore_index=True)
+
+
+def values_at_stations(values: pd.DataFrame, cells: pd.DataFrame, value_name: str) -> pd.DataFrame:
+    """Join per-cell values (``row, col, date, <value_name>``) to the stations of
+    ``cells``; returns long ``station_id, date, <value_name>``."""
+    out = cells[["station_id", "row", "col"]].merge(values, on=["row", "col"])
+    return out[["station_id", "date", value_name]].sort_values(["station_id", "date"],
+                                                                ignore_index=True)
+
+
 def extract_at_stations(files: list[Path], var: str, cells: pd.DataFrame, value_name: str,
                         out_dir: Path) -> pd.DataFrame:
     """Daily values of ``var`` at each station's cell, from every file in ``files``.
@@ -103,26 +142,15 @@ def extract_at_stations(files: list[Path], var: str, cells: pd.DataFrame, value_
     """
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
-    unique = cells[["row", "col"]].drop_duplicates()
     parts = []
     for path in sorted(files):
         part_file = out_dir / f"{Path(path).stem}.parquet"
         if not part_file.exists():
-            with xr.open_dataset(path) as ds:
-                lat_name, lon_name = _coord_names(ds)
-                da = ds[var].transpose("time", lat_name, lon_name)
-                dates = pd.to_datetime(da["time"].to_numpy()).normalize()
-                pieces = [pd.DataFrame({"row": r, "col": c, "date": dates,
-                                        value_name: da[:, r, c].to_numpy().astype(float)})
-                          for r, c in unique.itertuples(index=False)]
             tmp = part_file.with_suffix(".part")
-            pd.concat(pieces, ignore_index=True).to_parquet(tmp, index=False)
+            extract_cells(path, var, cells, value_name).to_parquet(tmp, index=False)
             tmp.rename(part_file)
         parts.append(pd.read_parquet(part_file))
-    values = pd.concat(parts, ignore_index=True)
-    out = cells[["station_id", "row", "col"]].merge(values, on=["row", "col"])
-    return out[["station_id", "date", value_name]].sort_values(["station_id", "date"],
-                                                                ignore_index=True)
+    return values_at_stations(pd.concat(parts, ignore_index=True), cells, value_name)
 
 
 FORCING_COLUMNS = {"chirps": ["precip_mm", "precip_60d_mm"], "dpet": ["pet_mm", "pet_60d_mm"]}
