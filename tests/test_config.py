@@ -2,6 +2,7 @@
 override changes only the keys it names."""
 
 import dataclasses
+import datetime
 
 import pytest
 
@@ -33,6 +34,8 @@ def test_override_changes_only_its_keys(smoke_cfg):
     ({"filters": {"r2_min": "high"}}, "does not match type"),
     ({"events": {"min_decline_days": 4.5}}, "does not match type"),
     ({"events": {"min_decline_days": True}}, "does not match type"),
+    ({"prepare": {"record_start": "soon"}}, "does not match type"),
+    ({"prepare": {"record_start": datetime.date(2025, 1, 1)}}, "must not be after"),
     ({"events": {"mask_above_fc": "yes"}}, "does not match type"),
     ({"prepare": {"grid_cell_rule": "bilinear"}}, "does not match type"),
     ({"filters": {"duration_days": [6, "100"]}}, "does not match type"),

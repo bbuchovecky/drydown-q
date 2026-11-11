@@ -2,6 +2,7 @@
 synthetic raw inputs (tests/raw_fixtures.py): daily aggregation, grid cells,
 forcing, MODIS, and resumability."""
 
+import datetime
 import subprocess
 import sys
 
@@ -26,7 +27,7 @@ def test_daily_means_masks_flags_and_counts_hours():
     h = _hourly(["2020-01-01 22:00", "2020-01-01 23:00", "2020-01-02 00:00",
                  "2020-01-02 01:00", "2020-01-02 02:00"],
                 [0.25, 0.26, 0.30, 0.90, np.nan], ["G", "G", "G", "D01", "G"])
-    d = daily_means(h, ["G"], 1, False)
+    d = daily_means(h, ["G"], 1, False, None, None)
     assert d.date.tolist() == list(pd.to_datetime(["2020-01-01", "2020-01-02"]))
     assert d.theta_m3m3.tolist() == pytest.approx([0.255, 0.30])   # 23:00 and 00:00 are different UTC days
     assert d.n_valid_hours.tolist() == [2, 1]                       # flagged and NaN records not counted
@@ -35,26 +36,36 @@ def test_daily_means_masks_flags_and_counts_hours():
 def test_daily_means_gap_days_and_min_hours():
     h = _hourly(["2020-01-01 10:00", "2020-01-01 11:00", "2020-01-04 10:00"],
                 [0.2, 0.3, 0.4], ["G", "G", "G"])
-    d = daily_means(h, ["G"], 1, False)
+    d = daily_means(h, ["G"], 1, False, None, None)
     assert len(d) == 4 and d.theta_m3m3.isna().tolist() == [False, True, True, False]
     assert d.n_valid_hours.tolist() == [2, 0, 0, 1]
-    d2 = daily_means(h, ["G"], 2, False)
+    d2 = daily_means(h, ["G"], 2, False, None, None)
     assert d2.theta_m3m3.notna().tolist() == [True, False, False, False]
 
 
 def test_daily_means_other_flags_option():
     h = _hourly(["2020-01-01 10:00", "2020-01-01 11:00"], [0.2, 0.4], ["G", "D01"])
-    assert daily_means(h, ["G", "D01"], 1, False).theta_m3m3.iloc[0] == pytest.approx(0.3)
+    assert daily_means(h, ["G", "D01"], 1, False, None, None).theta_m3m3.iloc[0] == pytest.approx(0.3)
 
 
 def test_combined_flags_and_frozen_exclusion():
     h = _hourly(["2020-01-01 10:00", "2020-01-01 11:00", "2020-01-01 12:00"],
                 [0.2, 0.4, 0.6], ["G", "D01", "D01,D06"])
-    assert daily_means(h, ["G"], 1, False).theta_m3m3.iloc[0] == pytest.approx(0.2)
-    keep_d01 = daily_means(h, ["G", "D01"], 1, False)                 # "D01,D06": D06 not kept
+    assert daily_means(h, ["G"], 1, False, None, None).theta_m3m3.iloc[0] == pytest.approx(0.2)
+    keep_d01 = daily_means(h, ["G", "D01"], 1, False, None, None)                 # "D01,D06": D06 not kept
     assert keep_d01.theta_m3m3.iloc[0] == pytest.approx(0.3) and keep_d01.n_valid_hours.iloc[0] == 2
-    frozen_out = daily_means(h, ["G", "D01", "D06"], 1, True)         # frozen records dropped anyway
+    frozen_out = daily_means(h, ["G", "D01", "D06"], 1, True, None, None)         # frozen records dropped anyway
     assert frozen_out.theta_m3m3.iloc[0] == pytest.approx(0.2) and frozen_out.n_valid_hours.iloc[0] == 1
+
+
+def test_daily_means_record_period():
+    h = _hourly(["2019-12-31 23:00", "2020-01-01 00:00", "2020-01-02 23:00", "2020-01-03 00:00"],
+                [0.1, 0.2, 0.3, 0.4], ["G", "G", "G", "G"])
+    d = daily_means(h, ["G"], 1, False, datetime.date(2020, 1, 1),
+                    datetime.date(2020, 1, 2))
+    assert d.date.tolist() == list(pd.to_datetime(["2020-01-01", "2020-01-02"]))   # both ends inclusive, UTC days
+    assert d.theta_m3m3.tolist() == pytest.approx([0.2, 0.3])
+    assert daily_means(h, ["G"], 1, False, None, None).date.min() == pd.Timestamp("2019-12-31")
 
 
 # ── grid cells ────────────────────────────────────────────────────────────────

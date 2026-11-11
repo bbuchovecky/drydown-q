@@ -11,6 +11,8 @@
 
 prepare:
   sensor_unit: probe                  # probe = join a probe's ISMN period files (_<probe>_<period>) into one record (Morgan's unit) | file
+  record_start: null                  # [UTC date] first day of ISMN records used, inclusive; null = from each record's start (Morgan's archive was requested from 1950-01-01)
+  record_end: 2024-04-05              # [UTC date] last day of ISMN records used, inclusive; null = to each record's end (Morgan's archive ended 2024-04-05)
   exclude_snow_frozen: false          # if true, drop records flagged D01/D02/D03 (soil, air, GLDAS soil temperature < 0 C) even if their flags are kept
   ismn_flags_kept: [G]                # ISMN quality flags kept (G = good); other flags become NaN
   day_definition: utc                 # daily means are over UTC calendar dates

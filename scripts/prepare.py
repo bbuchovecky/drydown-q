@@ -7,7 +7,8 @@ Steps (each skips work that is already done, so an interrupted run resumes):
 
 1. ISMN archive (``paths.ismn_archive``) with the ``ismn`` reader: soil moisture
    sensors and their metadata; per sensor, UTC daily means of the records
-   flagged ``prepare.ismn_flags_kept``, with ``n_valid_hours``.
+   flagged ``prepare.ismn_flags_kept`` on days from ``prepare.record_start`` to
+   ``record_end``, with ``n_valid_hours``.
 2. CHIRPS v2.0 0.05 deg precipitation (``paths.chirps_dir``) and dPET 0.1 deg
    (``paths.dpet_dir``) at each station's cell (``prepare.grid_cell_rule``),
    recording the station-to-cell offset and whether the cell is land.
@@ -96,12 +97,14 @@ n_batches = max(1, min(len(sensors), effective_n_jobs(cfg.runtime.n_jobs)))
 batches = [sensors.iloc[rows] for rows in np.array_split(np.arange(len(sensors)), n_batches)]
 results = Parallel(n_jobs=cfg.runtime.n_jobs)(
     delayed(ismn_daily.write_daily_files)(archive, meta_path, b, members, p.ismn_flags_kept,
-                                          p.min_valid_hours, p.exclude_snow_frozen, daily_dir)
+                                          p.min_valid_hours, p.exclude_snow_frozen,
+                                          p.record_start, p.record_end, daily_dir)
     for b in batches)
 failures += [f for batch in results for f in batch]
 sensors["daily_file"] = [daily_dir / f"{ismn_daily.file_key(s)}.parquet" for s in sensors.sensor_id]
 sensors = sensors[[f.exists() for f in sensors["daily_file"]]].reset_index(drop=True)
-log.info("   daily means written for %d sensors (%d failed)", len(sensors), len(failures))
+log.info("   daily means written for %d sensors (%d failed); record period %s to %s", len(sensors),
+         len(failures), p.record_start or "start", p.record_end or "end")
 
 # In situ precipitation (used only by events.precip_source = insitu_then_chirps).
 insitu_file = work / f"insitu_precip_{config_hash(p.ismn_flags_kept)}.parquet"

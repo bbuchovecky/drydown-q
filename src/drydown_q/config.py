@@ -12,6 +12,7 @@ rejected. This module holds no scientific numbers.
 """
 
 import dataclasses
+import datetime
 import hashlib
 import itertools
 import json
@@ -34,6 +35,8 @@ Number = int | float
 @dataclass(frozen=True)
 class Prepare:
     sensor_unit: Literal["probe", "file"]
+    record_start: datetime.date | None   # YAML reads an unquoted YYYY-MM-DD as a date
+    record_end: datetime.date | None
     exclude_snow_frozen: bool
     ismn_flags_kept: list[str]
     day_definition: Literal["utc"]
@@ -284,6 +287,9 @@ def load_config(run: str, paths_file: Path | None = None,
     sections = {name: _build(cls, merged.get(name, {}), name) for name, cls in SECTIONS.items()}
     if sections["covariates"].analysis_model not in sections["fitting"].models:
         raise ConfigError("covariates.analysis_model must be one of fitting.models")
+    p = sections["prepare"]
+    if p.record_start is not None and p.record_end is not None and p.record_start > p.record_end:
+        raise ConfigError("prepare.record_start must not be after prepare.record_end")
     return Config(run_name=run, paths=_build(Paths, paths, str(paths_file)), **sections)
 
 

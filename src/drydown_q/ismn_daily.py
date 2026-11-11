@@ -130,7 +130,7 @@ def kept_records(flags: pd.Series, flags_kept: list[str], exclude_frozen: bool) 
 
 
 def daily_means(hourly: pd.DataFrame, flags_kept: list[str], min_valid_hours: int,
-                exclude_frozen: bool) -> pd.DataFrame:
+                exclude_frozen: bool, record_start, record_end) -> pd.DataFrame:
     """UTC daily mean theta of the kept records (``kept_records``).
 
         theta_day = mean(theta_h : flag_h in flags_kept, theta_h not NaN)   [m3 m-3]
@@ -138,10 +138,19 @@ def daily_means(hourly: pd.DataFrame, flags_kept: list[str], min_valid_hours: in
 
     ISMN harmonised data are hourly, so the count is in hours. Days with fewer
     than ``min_valid_hours`` kept records are NaN (Morgan: no minimum, i.e. 1).
-    The result has one row for every day from the first to the last kept
-    record; days without kept records are NaN with n_valid_hours = 0.
+    Only records on UTC days from ``record_start`` to ``record_end`` (dates,
+    inclusive; None = no limit; prepare.record_start/end) are used. The result
+    has one row for every day from the first to the last kept record; days
+    without kept records are NaN with n_valid_hours = 0.
     """
-    kept = hourly[kept_records(hourly["flag"], flags_kept, exclude_frozen) & hourly["theta_m3m3"].notna()]
+    day = hourly["time"].dt.floor("D")
+    in_period = pd.Series(True, index=hourly.index)
+    if record_start is not None:
+        in_period &= day >= pd.Timestamp(record_start, tz=day.dt.tz)
+    if record_end is not None:
+        in_period &= day <= pd.Timestamp(record_end, tz=day.dt.tz)
+    kept = hourly[kept_records(hourly["flag"], flags_kept, exclude_frozen) & hourly["theta_m3m3"].notna()
+                  & in_period]
     if kept.empty:
         return pd.DataFrame({"date": pd.Series(dtype="datetime64[ns]"),
                              "theta_m3m3": pd.Series(dtype=float),
@@ -157,7 +166,7 @@ def daily_means(hourly: pd.DataFrame, flags_kept: list[str], min_valid_hours: in
 
 def write_daily_files(archive: Path, meta_path: Path, sensors: pd.DataFrame, members: pd.DataFrame,
                       flags_kept: list[str], min_valid_hours: int, exclude_frozen: bool,
-                      out_dir: Path) -> list[dict]:
+                      record_start, record_end, out_dir: Path) -> list[dict]:
     """Write ``out_dir/<file_key>.parquet`` (date, theta_m3m3, n_valid_hours) for
     each sensor in ``sensors`` that does not have one yet. A sensor's files
     (``members``) are read in period order and joined; consecutive period files
@@ -175,7 +184,7 @@ def write_daily_files(archive: Path, meta_path: Path, sensors: pd.DataFrame, mem
         try:
             parts = [read_hourly(ds, f.network, f.station, f.sensor) for f in files_of[s.sensor_id].itertuples()]
             hourly = pd.concat(parts, ignore_index=True).drop_duplicates("time", keep="first")
-            daily = daily_means(hourly, flags_kept, min_valid_hours, exclude_frozen)
+            daily = daily_means(hourly, flags_kept, min_valid_hours, exclude_frozen, record_start, record_end)
         except (OSError, ValueError, KeyError, IndexError) as err:
             failures.append({"id": s.sensor_id, "step": "ismn_daily",
                              "message": f"{type(err).__name__}: {err}"})
@@ -230,4 +239,4 @@ def daily_dir_name(cfg) -> str:
     settings that determine them, so changing one of them never reuses stale files."""
     from drydown_q.config import config_hash
     return f"daily_{cfg.sensor_unit}_" + config_hash(cfg.ismn_flags_kept, cfg.min_valid_hours,
-                                                     cfg.exclude_snow_frozen)
+                                                     cfg.exclude_snow_frozen, cfg.record_start, cfg.record_end)
