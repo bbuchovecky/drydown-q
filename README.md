@@ -37,6 +37,7 @@ edit the paths, and run `pixi run prepare` once (slow: reads the raw archives).
 | --- | --- |
 | `smoke` | unit tests plus the whole pipeline on `tests/data/smoke` (< 1 min, no downloads) |
 | `prepare` | raw ISMN, CHIRPS, dPET and MODIS data → `sensors` + `station_day` |
+| `download-chirps` | CHIRPS v2.0 at the ISMN station cells, from the official CHC files (`downloads/chirps.py`) |
 | `analyze --run <name>` | `station_day` → events, fits, filters, bins, surfaces, report |
 | `reproduce` | baseline vs the released Morgan et al. results |
 | `sweep --sweep <name>` | many `analyze` runs → `summary.parquet` + specification curve |
@@ -48,7 +49,7 @@ edit the paths, and run `pixi run prepare` once (slow: reads the raw archives).
 | Path key | Expected contents |
 | --- | --- |
 | `ismn_archive` | an unpacked ISMN archive (header_values `.stm` files + `*_static_variables.csv`), read with the `ismn` package; its metadata cache goes to `<prepared_dir>/work/ismn_meta` |
-| `chirps_dir` | CHIRPS v2.0 0.05° daily yearly files `chirps-v2.0.<year>.days_p05.nc`, variable `precip` [mm d⁻¹] |
+| `chirps_dir` | CHIRPS v2.0 0.05° daily yearly files `chirps-v2.0.<year>.days_p05.nc`, variable `precip` [mm d⁻¹]; or the station-cell extract written there by `pixi run download-chirps` (see below) |
 | `dpet_dir` | dPET 0.1° daily yearly files `<year>_daily_pet.nc`, variable `pet` [mm d⁻¹] |
 | `appeears_dir` | tidy AppEEARS parquet from `appeears_pipeline tidy`: `*__MOD15A2H.061.parquet` (or `MCD15A2H.061`), `*__MCD12Q1.061.parquet`, `*__MOD44B.061.parquet` |
 
@@ -57,6 +58,25 @@ per-input-file extractions) and skips any that exist, so an interrupted run resu
 Sensors or stations that fail are listed in `<prepared_dir>/failures.csv`.
 `station_day` starts `ai_window_days − 1` days before each sensor's first value, so the
 analysis can recompute the AI window sums exactly.
+
+## Downloads
+
+Scripts in `downloads/` fetch input data; their transfer settings (server, file names,
+retries) are in `config/downloads/<source>.yml`. Scientific choices still come from the
+run config, and the output location from `config/paths.yml`.
+
+`pixi run download-chirps` (`downloads/chirps.py`, after `prepare` step 1) downloads the
+official CHC annual CHIRPS v2.0 files one at a time, keeps only the grid cells that
+`prepare` would use for the ISMN stations (`prepare.grid_cell_rule`, same function), and
+deletes each file: disk use peaks at one annual file (about 1.1 GiB), while the whole
+download is about 1.1 GiB per year. Years run from the earliest record minus
+2 × (`ai_window_days` − 1) days to the latest record. It writes to `chirps_dir`:
+`grid.npz` (cell centres and land mask), `cells.parquet` (each station's cell and offset),
+`chirps-v2.0.<year>.days_p05.parquet` (`row, col, date, precip_mm`) and `download_log.csv`.
+`prepare` reads this extract instead of the netCDF files and gives the same `station_day`
+(tested). Re-runs skip finished years; `--years 2026` re-fetches a year that CHC has
+since extended. Stations beyond 50° latitude get CHIRPS's edge cell under the `nearest`
+rule, as in Morgan's code; see `chirps_offset_km`.
 
 ## Configuration
 

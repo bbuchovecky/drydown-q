@@ -13,7 +13,11 @@ centre of the cell used) and ``cell_is_land`` (that cell has a finite value on
 the first day of the first file), whatever the rule.
 
 Extraction reads one file at a time and writes one parquet per input file to
-``out_dir``, so an interrupted run resumes where it stopped.
+``out_dir``, so an interrupted run resumes where it stopped. The same per-file
+tables (``row, col, date, <value>``) can instead come from
+``downloads/chirps.py``, which keeps only the station cells of each official
+file it downloads, plus the grid (``save_grid``) so the cell rule can be applied
+again here.
 """
 
 from pathlib import Path
@@ -21,6 +25,8 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import xarray as xr
+
+GRID_FILE = "grid.npz"   # grid of an extract, written next to its per-file tables
 
 
 def window_sum(daily: pd.Series, window_days: int, min_valid_days: int) -> pd.Series:
@@ -63,11 +69,22 @@ def read_grid(first_file: Path, var: str) -> tuple[np.ndarray, np.ndarray, np.nd
     return lats, lons, land
 
 
+def save_grid(path: Path, lats: np.ndarray, lons: np.ndarray, land: np.ndarray) -> None:
+    """Write the output of ``read_grid`` to ``path`` (compressed .npz)."""
+    np.savez_compressed(path, lats=lats, lons=lons, land=land)
+
+
+def load_grid(path: Path) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Read a grid written by ``save_grid``: (lats, lons, land)."""
+    with np.load(path) as g:
+        return g["lats"], g["lons"], g["land"]
+
+
 def locate_cells(lats: np.ndarray, lons: np.ndarray, land: np.ndarray, stations: pd.DataFrame,
                  rule: str, max_km: float | None, earth_radius_km: float) -> pd.DataFrame:
     """Per station: grid ``row``, ``col``, ``offset_km``, ``cell_is_land``.
 
-    ``lats``, ``lons``, ``land`` come from ``read_grid``;
+    ``lats``, ``lons``, ``land`` come from ``read_grid`` (or ``load_grid``);
     ``stations`` has station_id, lat_deg, lon_deg.
     """
     if rule == "nearest_land_within_km" and max_km is None:
@@ -150,6 +167,27 @@ def extract_at_stations(files: list[Path], var: str, cells: pd.DataFrame, value_
             extract_cells(path, var, cells, value_name).to_parquet(tmp, index=False)
             tmp.rename(part_file)
         parts.append(pd.read_parquet(part_file))
+    return values_at_stations(pd.concat(parts, ignore_index=True), cells, value_name)
+
+
+def read_extracts(part_files: list[Path], cells: pd.DataFrame, value_name: str) -> pd.DataFrame:
+    """Station values from per-file cell tables written by ``downloads/chirps.py``.
+
+    Every cell in ``cells`` must be in every part; otherwise the extract was made
+    for other stations or another cell rule, and ValueError names the first
+    part that is incomplete.
+    """
+    if not part_files:
+        raise ValueError("no extracted files")
+    needed = set(cells[["row", "col"]].itertuples(index=False, name=None))
+    parts = []
+    for path in sorted(part_files):
+        part = pd.read_parquet(path)
+        missing = needed - set(part[["row", "col"]].drop_duplicates().itertuples(index=False, name=None))
+        if missing:
+            raise ValueError(f"{path} lacks {len(missing)} of the {len(needed)} cells needed; "
+                             "re-run downloads/chirps.py with this run's prepare settings")
+        parts.append(part)
     return values_at_stations(pd.concat(parts, ignore_index=True), cells, value_name)
 
 

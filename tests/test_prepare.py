@@ -262,6 +262,39 @@ def test_extract_cells_reads_chunk_blocks_like_single_cells(tmp_path):
         assert got == pytest.approx(values[:, r, c])
 
 
+def test_download_chirps_extract_gives_the_same_station_day(raw, prepared, tmp_path):
+    """downloads/chirps.py (from file:// URLs) then prepare.py on the extract equals
+    prepare.py on the full files, and the downloaded files are deleted."""
+    extract = tmp_path / "chirps_extract"
+    step1 = dict(raw, chirps_dir=str(extract), dpet_dir=None, appeears_dir=None,
+                 prepared_dir=str(tmp_path / "prepared"))
+    (tmp_path / "step1.yml").write_text(yaml.safe_dump(step1))
+    run = [sys.executable, str(REPO / "scripts" / "prepare.py"), "--paths", str(tmp_path / "step1.yml")]
+    assert subprocess.run(run, capture_output=True, text=True, cwd=REPO).returncode == 0
+    settings = yaml.safe_load((REPO / "config" / "downloads" / "chirps.yml").read_text())
+    settings.update(base_url=__import__("pathlib").Path(raw["chirps_dir"]).as_uri(), retries=0)
+    (tmp_path / "settings.yml").write_text(yaml.safe_dump(settings))
+    dl = [sys.executable, str(REPO / "downloads" / "chirps.py"), "--paths", str(tmp_path / "step1.yml"),
+          "--settings", str(tmp_path / "settings.yml")]
+    first = subprocess.run(dl, capture_output=True, text=True, cwd=REPO)
+    assert first.returncode == 0, first.stderr[-3000:]
+    assert sorted(f.name for f in extract.glob("*.parquet")) == [
+        "cells.parquet", "chirps-v2.0.2019.days_p05.parquet", "chirps-v2.0.2020.days_p05.parquet"]
+    assert not list((extract / "incoming").glob("*"))           # annual files deleted after extraction
+    again = subprocess.run(dl, capture_output=True, text=True, cwd=REPO)
+    assert again.returncode == 0 and again.stderr.count("already extracted") == 2
+
+    full = dict(raw, chirps_dir=str(extract), prepared_dir=str(tmp_path / "prepared"))
+    (tmp_path / "full.yml").write_text(yaml.safe_dump(full))
+    run = [sys.executable, str(REPO / "scripts" / "prepare.py"), "--paths", str(tmp_path / "full.yml")]
+    done = subprocess.run(run, capture_output=True, text=True, cwd=REPO)
+    assert done.returncode == 0, done.stderr[-3000:]
+    ours = pd.read_parquet(tmp_path / "prepared" / "station_day.parquet")
+    pd.testing.assert_frame_equal(ours, prepared["day"])
+    sensors = pd.read_parquet(tmp_path / "prepared" / "sensors.parquet")
+    pd.testing.assert_frame_equal(sensors, prepared["sensors"])
+
+
 def test_mask_by_cell():
     from drydown_q.gridded import mask_by_cell
     forcing = pd.DataFrame({"station_id": ["a", "a", "b", "c"], "precip_mm": 1.0, "precip_60d_mm": 60.0,

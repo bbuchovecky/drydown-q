@@ -1,6 +1,6 @@
 """Guard for the rule "no number with scientific meaning in a .py file".
 
-Every numeric literal in src/ and scripts/ must be one of a few structural
+Every numeric literal in src/, scripts/ and downloads/ must be one of a few structural
 values (indices, counts, formatting, the mm-per-m unit conversion). Anything
 else belongs in config/default.yml or data/tables/.
 """
@@ -23,7 +23,8 @@ ALLOWED = {
 # Matplotlib layout keywords: numbers passed to these are presentation, not science.
 LAYOUT_KEYWORDS = {"fontsize", "figsize", "dpi", "ms", "lw", "gridspec_kw", "xytext", "rect",
                    "bbox_to_anchor", "ncol"}
-FILES = sorted([*(REPO / "src").rglob("*.py"), *(REPO / "scripts").glob("*.py")])
+FILES = sorted([*(REPO / "src").rglob("*.py"), *(REPO / "scripts").glob("*.py"),
+                *(REPO / "downloads").glob("*.py")])
 
 
 @pytest.mark.parametrize("path", FILES, ids=lambda p: str(p.relative_to(REPO)))

@@ -29,6 +29,7 @@ drydown-q = { path = ".", editable = true }
 test = "pytest"
 smoke = { cmd = "pytest -q -m 'not recovery' && python scripts/analyze.py --run smoke --paths config/paths.smoke.yml && python scripts/sweep.py --sweep smoke --paths config/paths.smoke.yml" }
 prepare = "python scripts/prepare.py"
+download-chirps = "python downloads/chirps.py"
 analyze = { cmd = "python scripts/analyze.py --run {{ run }}", args = [{ arg = "run", default = "morgan2025" }] }
 reproduce = "python scripts/reproduce.py --refit-sample 4000"
 sweep = { cmd = "python scripts/sweep.py --sweep {{ sweep }}", args = [{ arg = "sweep", default = "thresholds" }] }

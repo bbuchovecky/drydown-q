@@ -1,0 +1,11 @@
+# CHIRPS v2.0 daily precipitation, 0.05 deg, official Climate Hazards Center files.
+# Transfer settings only. Which cells are kept follows `prepare` in the run config
+# (grid_cell_rule, max_cell_offset_km, earth_radius_km); which years follows the ISMN
+# records. The extract is written to `chirps_dir` in config/paths.yml.
+base_url: https://data.chc.ucsb.edu/products/CHIRPS/v2.0/global_daily/netcdf/p05   # moved from products/CHIRPS-2.0/ (the old path returns 404)
+file_pattern: chirps-v2.0.{year}.days_p05.nc   # one global file per year, about 1.1 GiB
+variable: precip                               # [mm d-1] daily precipitation
+timeout_s: 120                                 # [s] socket time-out of one request
+retries: 5                                     # further attempts after a failed one (resumes partial files)
+retry_wait_s: 60                               # [s] wait before each retry (the server answers bursts with HTTP 429)
+read_chunk_mb: 8                               # [MiB] read size while streaming a file to disk

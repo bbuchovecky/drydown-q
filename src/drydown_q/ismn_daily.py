@@ -212,6 +212,19 @@ def insitu_precip(ds: ISMN_Interface, flags_kept: list[str]) -> pd.DataFrame:
     return out.groupby(["station_id", "date"], as_index=False)["precip_insitu_mm"].mean()
 
 
+def record_spans(sensors: pd.DataFrame) -> pd.DataFrame:
+    """First and last date of the daily files of each station: ``station_id, first, last``.
+
+    ``sensors`` has station_id and daily_file; stations whose files are empty are left out.
+    """
+    spans = []
+    for station_id, group in sensors.groupby("station_id"):
+        dates = pd.concat([pd.read_parquet(f, columns=["date"])["date"] for f in group["daily_file"]])
+        if not dates.empty:
+            spans.append({"station_id": station_id, "first": dates.min(), "last": dates.max()})
+    return pd.DataFrame(spans, columns=["station_id", "first", "last"])
+
+
 def daily_dir_name(cfg) -> str:
     """Folder (under prepared_dir/work) of the per-sensor daily files for the
     settings that determine them, so changing one of them never reuses stale files."""

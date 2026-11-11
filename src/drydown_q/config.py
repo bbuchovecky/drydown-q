@@ -172,6 +172,18 @@ SECTIONS = {
 }
 
 
+@dataclass(frozen=True)
+class ChirpsDownload:
+    """config/downloads/chirps.yml: where and how to fetch the files (no science)."""
+    base_url: str
+    file_pattern: str
+    variable: str
+    timeout_s: Number
+    retries: int
+    retry_wait_s: Number
+    read_chunk_mb: int
+
+
 class ConfigError(ValueError):
     """Raised for unknown keys, missing keys or values of the wrong type."""
 
@@ -273,6 +285,14 @@ def load_config(run: str, paths_file: Path | None = None,
     if sections["covariates"].analysis_model not in sections["fitting"].models:
         raise ConfigError("covariates.analysis_model must be one of fitting.models")
     return Config(run_name=run, paths=_build(Paths, paths, str(paths_file)), **sections)
+
+
+def load_download(path: Path, cls):
+    """Read a download settings file (``config/downloads/<source>.yml``) into ``cls``."""
+    path = Path(path)
+    if not path.exists():
+        raise ConfigError(f"no download settings file {path}")
+    return _build(cls, _read_yaml(path), str(path))
 
 
 def load_sweep(name: str) -> tuple[str, list[tuple[str, dict]]]:
