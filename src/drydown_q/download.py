@@ -4,11 +4,14 @@
 byte count matches the server's Content-Length. A transfer that breaks off
 resumes from the partial file with an HTTP Range request; time-outs, dropped
 connections, "too many requests" and server errors are retried after a wait.
-Any other HTTP error (e.g. 404, file not on the server) is raised at once.
+Any other HTTP error (e.g. 404, file not on the server) is raised at once, and
+so is a lack of free disk space for the bytes still to come (checked before
+writing, so a full disk is never reached part-way through a file).
 """
 
 import logging
 import re
+import shutil
 import time
 import urllib.error
 import urllib.request
@@ -42,8 +45,8 @@ def fetch(url: str, dest: Path, timeout_s: float, retries: int, retry_wait_s: fl
     ``retries`` consecutive failed attempts that added no bytes (an attempt
     that made progress resets the count, since a slow server may stall many
     times during one large file). ``timeout_s`` is the socket time-out. Raises
-    urllib.error.HTTPError for a non-retryable HTTP status and OSError when
-    the retries are used up.
+    urllib.error.HTTPError for a non-retryable HTTP status, and OSError when
+    the retries are used up or the disk lacks room for the rest of the file.
     """
     dest = Path(dest)
     dest.parent.mkdir(parents=True, exist_ok=True)
@@ -64,6 +67,10 @@ def fetch(url: str, dest: Path, timeout_s: float, retries: int, retry_wait_s: fl
                 resumed = getattr(response, "status", None) == HTTPStatus.PARTIAL_CONTENT
                 length = response.headers.get("Content-Length")
                 expected = (have if resumed else 0) + int(length) if length is not None else None
+                free = shutil.disk_usage(part.parent).free
+                if length is not None and int(length) > free:
+                    raise OSError(f"{dest.name}: {int(length) >> 20} MiB still to fetch but only "
+                                  f"{free >> 20} MiB free in {part.parent}")
                 with open(part, "ab" if resumed else "wb") as f:
                     while chunk := response.read(chunk_bytes):
                         f.write(chunk)

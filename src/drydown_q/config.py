@@ -176,8 +176,9 @@ SECTIONS = {
 
 
 @dataclass(frozen=True)
-class ChirpsDownload:
-    """config/downloads/chirps.yml: where and how to fetch the files (no science)."""
+class GriddedDownload:
+    """config/downloads/<source>.yml for annual gridded files (chirps, dpet):
+    where and how to fetch them (no science)."""
     base_url: str
     file_pattern: str
     variable: str

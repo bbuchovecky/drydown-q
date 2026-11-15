@@ -12,10 +12,10 @@ Steps (each skips work that is already done, so an interrupted run resumes):
 2. CHIRPS v2.0 0.05 deg precipitation (``paths.chirps_dir``) and dPET 0.1 deg
    (``paths.dpet_dir``) at each station's cell (``prepare.grid_cell_rule``),
    recording the station-to-cell offset and whether the cell is land.
-   ``chirps_dir`` holds either the annual CHC netCDF files or the station-cell
-   extract of them written by ``downloads/chirps.py``; the same cells are used
-   either way. dPET
-   values >= ``pet_valid_max_mm_day`` become NaN. Trailing window sums of P and
+   Each folder holds either the annual netCDF files or the station-cell
+   extract of them written by ``downloads/chirps.py`` / ``downloads/dpet.py``;
+   the same cells are used either way. dPET values >= ``pet_valid_max_mm_day``
+   become NaN. Trailing window sums of P and
    PET (``covariates.ai_window_days``, ``ai_window_min_valid_days``) are taken on
    the full forcing record, so they are complete at the start of a sensor record.
 3. MODIS from the tidy AppEEARS outputs (``paths.appeears_dir``): daily LAI
@@ -45,8 +45,9 @@ from drydown_q.schemas import SCHEMAS, assert_schema
 
 # Input file layouts (data formats, not science).
 CHIRPS_GLOB, CHIRPS_VAR = "chirps-v2.0.*.days_p05.nc", "precip"
-CHIRPS_EXTRACT_GLOB = "chirps-v2.0.*.days_p05.parquet"   # station cells from downloads/chirps.py
 DPET_GLOB, DPET_VAR = "*_daily_pet.nc", "pet"
+# Station-cell extracts written by downloads/chirps.py and downloads/dpet.py.
+EXTRACT_GLOBS = {"chirps": "chirps-v2.0.*.days_p05.parquet", "dpet": "*_daily_pet.parquet"}
 
 parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
 parser.add_argument("--run", default="morgan2025", help="run file whose `prepare` settings apply")
@@ -134,15 +135,15 @@ if not forcing_file.exists():
     for source, folder, glob, var, column in [("chirps", cfg.paths.chirps_dir, CHIRPS_GLOB, CHIRPS_VAR, "precip_mm"),
                                               ("dpet", cfg.paths.dpet_dir, DPET_GLOB, DPET_VAR, "pet_mm")]:
         folder = Path(folder)
-        if source == "chirps" and (folder / gridded.GRID_FILE).exists():
-            # Station-cell extract from downloads/chirps.py: the cell rule is applied to the
+        if (folder / gridded.GRID_FILE).exists():
+            # Station-cell extract from downloads/<source>.py: the cell rule is applied to the
             # saved grid exactly as to a file, and every chosen cell must be in every year.
             loc = gridded.locate_cells(*gridded.load_grid(folder / gridded.GRID_FILE), stations,
                                        p.grid_cell_rule, p.max_cell_offset_km, p.earth_radius_km)
             try:
-                values = gridded.read_extracts(sorted(folder.glob(CHIRPS_EXTRACT_GLOB)), loc, column)
+                values = gridded.read_extracts(sorted(folder.glob(EXTRACT_GLOBS[source])), loc, column)
             except ValueError as error:
-                raise SystemExit(f"CHIRPS extract in {folder}: {error}") from error
+                raise SystemExit(f"{source} extract in {folder}: {error}") from error
         else:
             files = sorted(folder.glob(glob))
             if not files:

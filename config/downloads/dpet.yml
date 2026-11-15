@@ -1,0 +1,12 @@
+# dPET (Singer et al. 2021, doi:10.1038/s41597-021-01003-9) daily potential ET, 0.1 deg,
+# from the University of Bristol data repository. Transfer settings only. Which cells
+# are kept follows `prepare` in the run config (grid_cell_rule, max_cell_offset_km,
+# earth_radius_km); which years follows the ISMN records. The extract is written to
+# `dpet_dir` in config/paths.yml.
+base_url: https://data.bris.ac.uk/datasets/qb8ujazzda0s2aykkv0oq0ctp
+file_pattern: "{year}_daily_pet.nc"   # one global file per year (1981-2025), about 2.2 GiB
+variable: pet                         # [mm d-1] daily potential evapotranspiration
+timeout_s: 120                        # [s] socket time-out of one request
+retries: 5                            # further attempts after a failed one (resumes partial files)
+retry_wait_s: 60                      # [s] wait before each retry
+read_chunk_mb: 8                      # [MiB] read size while streaming a file to disk

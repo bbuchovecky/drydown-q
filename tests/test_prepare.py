@@ -273,29 +273,34 @@ def test_extract_cells_reads_chunk_blocks_like_single_cells(tmp_path):
         assert got == pytest.approx(values[:, r, c])
 
 
-def test_download_chirps_extract_gives_the_same_station_day(raw, prepared, tmp_path):
-    """downloads/chirps.py (from file:// URLs) then prepare.py on the extract equals
+@pytest.mark.parametrize("source, path_key, tables", [
+    ("chirps", "chirps_dir", ["chirps-v2.0.2019.days_p05.parquet", "chirps-v2.0.2020.days_p05.parquet"]),
+    ("dpet", "dpet_dir", ["2019_daily_pet.parquet", "2020_daily_pet.parquet"]),
+])
+def test_download_extract_gives_the_same_station_day(raw, prepared, tmp_path, source, path_key, tables):
+    """downloads/<source>.py (from file:// URLs) then prepare.py on the extract equals
     prepare.py on the full files, and the downloaded files are deleted."""
-    extract = tmp_path / "chirps_extract"
-    step1 = dict(raw, chirps_dir=str(extract), dpet_dir=None, appeears_dir=None,
+    extract = tmp_path / f"{source}_extract"
+    step1 = dict(raw, chirps_dir=None, dpet_dir=None, appeears_dir=None,
                  prepared_dir=str(tmp_path / "prepared"))
+    step1[path_key] = str(extract)
     (tmp_path / "step1.yml").write_text(yaml.safe_dump(step1))
     run = [sys.executable, str(REPO / "scripts" / "prepare.py"), "--paths", str(tmp_path / "step1.yml")]
     assert subprocess.run(run, capture_output=True, text=True, cwd=REPO).returncode == 0
-    settings = yaml.safe_load((REPO / "config" / "downloads" / "chirps.yml").read_text())
-    settings.update(base_url=__import__("pathlib").Path(raw["chirps_dir"]).as_uri(), retries=0)
+    settings = yaml.safe_load((REPO / "config" / "downloads" / f"{source}.yml").read_text())
+    settings.update(base_url=__import__("pathlib").Path(raw[path_key]).as_uri(), retries=0)
     (tmp_path / "settings.yml").write_text(yaml.safe_dump(settings))
-    dl = [sys.executable, str(REPO / "downloads" / "chirps.py"), "--paths", str(tmp_path / "step1.yml"),
+    dl = [sys.executable, str(REPO / "downloads" / f"{source}.py"), "--paths", str(tmp_path / "step1.yml"),
           "--settings", str(tmp_path / "settings.yml")]
     first = subprocess.run(dl, capture_output=True, text=True, cwd=REPO)
     assert first.returncode == 0, first.stderr[-3000:]
-    assert sorted(f.name for f in extract.glob("*.parquet")) == [
-        "cells.parquet", "chirps-v2.0.2019.days_p05.parquet", "chirps-v2.0.2020.days_p05.parquet"]
+    assert sorted(f.name for f in extract.glob("*.parquet")) == sorted(["cells.parquet", *tables])
     assert not list((extract / "incoming").glob("*"))           # annual files deleted after extraction
     again = subprocess.run(dl, capture_output=True, text=True, cwd=REPO)
     assert again.returncode == 0 and again.stderr.count("already extracted") == 2
 
-    full = dict(raw, chirps_dir=str(extract), prepared_dir=str(tmp_path / "prepared"))
+    full = dict(raw, prepared_dir=str(tmp_path / "prepared"))
+    full[path_key] = str(extract)
     (tmp_path / "full.yml").write_text(yaml.safe_dump(full))
     run = [sys.executable, str(REPO / "scripts" / "prepare.py"), "--paths", str(tmp_path / "full.yml")]
     done = subprocess.run(run, capture_output=True, text=True, cwd=REPO)

@@ -38,6 +38,7 @@ edit the paths, and run `pixi run prepare` once (slow: reads the raw archives).
 | `smoke` | unit tests plus the whole pipeline on `tests/data/smoke` (< 1 min, no downloads) |
 | `prepare` | raw ISMN, CHIRPS, dPET and MODIS data → `sensors` + `station_day` |
 | `download-chirps` | CHIRPS v2.0 at the ISMN station cells, from the official CHC files (`downloads/chirps.py`) |
+| `download-dpet` | dPET at the ISMN station cells, from the University of Bristol files (`downloads/dpet.py`) |
 | `analyze --run <name>` | `station_day` → events, fits, filters, bins, surfaces, report |
 | `reproduce` | baseline vs the released Morgan et al. results |
 | `sweep --sweep <name>` | many `analyze` runs → `summary.parquet` + specification curve |
@@ -50,7 +51,7 @@ edit the paths, and run `pixi run prepare` once (slow: reads the raw archives).
 | --- | --- |
 | `ismn_archive` | an unpacked ISMN archive (header_values `.stm` files + `*_static_variables.csv`), read with the `ismn` package; its metadata cache goes to `<prepared_dir>/work/ismn_meta` |
 | `chirps_dir` | CHIRPS v2.0 0.05° daily yearly files `chirps-v2.0.<year>.days_p05.nc`, variable `precip` [mm d⁻¹]; or the station-cell extract written there by `pixi run download-chirps` (see below) |
-| `dpet_dir` | dPET 0.1° daily yearly files `<year>_daily_pet.nc`, variable `pet` [mm d⁻¹] |
+| `dpet_dir` | dPET 0.1° daily yearly files `<year>_daily_pet.nc`, variable `pet` [mm d⁻¹]; or the station-cell extract written there by `pixi run download-dpet` (see below) |
 | `appeears_dir` | tidy AppEEARS parquet from `appeears_pipeline tidy`: `*__MOD15A2H.061.parquet` (or `MCD15A2H.061`), `*__MCD12Q1.061.parquet`, `*__MOD44B.061.parquet` |
 
 `prepare` writes intermediate files to `<prepared_dir>/work/` (per-sensor daily means,
@@ -77,6 +78,18 @@ download is about 1.1 GiB per year. Years run from the earliest record minus
 (tested). Re-runs skip finished years; `--years 2026` re-fetches a year that CHC has
 since extended. Stations beyond 50° latitude get CHIRPS's edge cell under the `nearest`
 rule, as in Morgan's code; see `chirps_offset_km`.
+
+`pixi run download-dpet` (`downloads/dpet.py`) does the same for dPET (Singer et al.
+2021) from the University of Bristol repository: annual 0.1° files for 1981–2025, about
+2.2 GiB each, so disk use peaks at about 2.2 GiB. It writes `grid.npz`, `cells.parquet`,
+`<year>_daily_pet.parquet` (`row, col, date, pet_mm`, values as published;
+`pet_valid_max_mm_day` is applied by `prepare`) and `download_log.csv` to `dpet_dir`.
+The server can be slow (hours per file); an interrupted file resumes where it stopped.
+Each file stores a day as nine 60° × 120° tiles and the ISMN stations lie in all nine,
+so reading only the station cells by HTTP range would not reduce the transfer.
+
+Before writing, each download checks that the disk has room for the rest of the file
+and fails that year (recorded in `download_log.csv`) if it does not.
 
 ## Configuration
 

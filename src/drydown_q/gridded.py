@@ -15,8 +15,8 @@ the first day of the first file), whatever the rule.
 Extraction reads one file at a time and writes one parquet per input file to
 ``out_dir``, so an interrupted run resumes where it stopped. The same per-file
 tables (``row, col, date, <value>``) can instead come from
-``downloads/chirps.py``, which keeps only the station cells of each official
-file it downloads, plus the grid (``save_grid``) so the cell rule can be applied
+``downloads/chirps.py`` or ``downloads/dpet.py``, which keep only the station cells of each
+official file they download, plus the grid (``save_grid``) so the cell rule can be applied
 again here.
 """
 
@@ -171,7 +171,7 @@ def extract_at_stations(files: list[Path], var: str, cells: pd.DataFrame, value_
 
 
 def read_extracts(part_files: list[Path], cells: pd.DataFrame, value_name: str) -> pd.DataFrame:
-    """Station values from per-file cell tables written by ``downloads/chirps.py``.
+    """Station values from per-file cell tables written by ``downloads/<source>.py``.
 
     Every cell in ``cells`` must be in every part; otherwise the extract was made
     for other stations or another cell rule, and ValueError names the first
@@ -186,7 +186,7 @@ def read_extracts(part_files: list[Path], cells: pd.DataFrame, value_name: str) 
         missing = needed - set(part[["row", "col"]].drop_duplicates().itertuples(index=False, name=None))
         if missing:
             raise ValueError(f"{path} lacks {len(missing)} of the {len(needed)} cells needed; "
-                             "re-run downloads/chirps.py with this run's prepare settings")
+                             "re-run the downloads/ script with this run's prepare settings")
         parts.append(part)
     return values_at_stations(pd.concat(parts, ignore_index=True), cells, value_name)
 

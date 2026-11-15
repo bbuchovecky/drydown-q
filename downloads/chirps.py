@@ -47,7 +47,7 @@ from pathlib import Path
 import pandas as pd
 
 from drydown_q import download, gridded, ismn_daily
-from drydown_q.config import CONFIG_DIR, ChirpsDownload, load_config, load_download
+from drydown_q.config import CONFIG_DIR, GriddedDownload, load_config, load_download
 
 parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
 parser.add_argument("--run", default="morgan2025", help="run file whose `prepare` and `covariates` settings apply")
@@ -59,7 +59,7 @@ args = parser.parse_args()
 started = time.time()
 
 cfg = load_config(args.run, args.paths)
-s = load_download(args.settings, ChirpsDownload)
+s = load_download(args.settings, GriddedDownload)
 p, cov = cfg.prepare, cfg.covariates
 if cfg.paths.chirps_dir is None:
     raise SystemExit("set chirps_dir in the paths file: the CHIRPS extract is written there")
